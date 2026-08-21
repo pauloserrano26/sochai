@@ -10,7 +10,7 @@ llm = ChatOpenAI(
     temperature=0.1
 )
 
-# Agente 1: Analisis de Alertas 
+# Agente 1: Análise de Alertas 
 alert_analyzer = create_react_agent(
     model=llm,
     tools=[search_tool, virustotal_checker],
@@ -56,46 +56,46 @@ threat_analyzer = create_react_agent(
     tools=[search_tool],
     prompt="""És um especialista em análise de amenaças e respossta a incidentes do SOC.
     
-    HERRAMIENTAS DISPONIBLES:
+    fERRAMIENTAS DISPONIVEIS:
     - tavily_search_results_json: Búsqueda de TTPs, técnicas de ataque, y mitigación
     
-    PROCESO DE EVALUACIÓN OBLIGATORIO:
+    PROCESSO DE AVALIAÇÃO OBRIGATÓRIO:
     1. Investigar el tipo específico de amenaza con tavily_search_results_json
-    2. Buscar TTPs (Tactics, Techniques, Procedures) actualizados relacionados
-    3. Evaluar severidad: CRÍTICA, ALTA, MEDIA, BAJA con justificación técnica
-    4. Investigar medidas de mitigación específicas y actualizadas
-    5. Proponer acciones de respuesta inmediata y a largo plazo
-    6. Calcular nivel de riesgo organizacional considerando vectores de ataque
+    2. Procurar TTPs (Tactics, Techniques, Procedures) atualizados relacionados
+    3. Avaliar com severidade: CRÍTICA, ALTA, MÉDIA, BAIXA com justificação técnica
+    4. Investigar medidas de mitigação específicas e atualizadas
+    5. Propô ações de resposta imediata e a longo plazo
+    6. Calcular nivel de risco organizacional considerando vetores de ataque
     
-    FORMATO DE RESPUESTA REQUERIDO:
-    🎯 EVALUACIÓN DE AMENAZA COMPLETADA
+    FORMATO DE RESPOSTA REQUERIDO:
+    🎯 VALIAÇÃO DA AEMAEÇA COMPLETADA
     
     🔍 TIPO DE AMENAZA:
-    [Clasificación específica de la amenaza]
+    [Clasificação específica da amenaça]
     
     ⚔️ TTPs IDENTIFICADOS:
     [Tactics, Techniques, Procedures encontrados]
     
     📊 NIVEL DE SEVERIDAD: [CRÍTICA/ALTA/MEDIA/BAJA]
-    📋 JUSTIFICACIÓN: [Evidencia técnica que soporta el nivel]
+    📋 JUSTIFICACIÓN: [Evidência técnica que soporta el nivel]
     
     🛡️ INFORMACIÓN DE CAMPAÑAS:
     [Contexto de threat intelligence sobre actores/campañas]
     
-    🔧 MEDIDAS DE MITIGACIÓN INMEDIATAS:
-    [Acciones específicas para implementar YA]
+    🔧 MEDIDAS DE MITIGAÇÃO IMEDIATAS:
+    [Ações específicas para implementar JÁ]
     
-    📅 PLAN DE RESPUESTA A LARGO PLAZO:
-    [Estrategia de fortalecimiento y prevención]
+    📅 PLANO DE RESPOSTA A LONGO PRAZO:
+    [Estratégia de fortalecimento e prevenção]
     
-    ⚠️ RIESGO ORGANIZACIONAL: [Alto/Medio/Bajo]
-    📈 VECTORES DE PROPAGACIÓN: [Cómo puede expandirse]
+    ⚠️ RISCO ORGANIZACIONAL: [Alto/Médio/Baixo]
+    📈 VECTORES DE PROPAGAÇÃO: [Como pode expandir-se]
     
     IMPORTANTE:
-    - Usa búsquedas web para obtener información actualizada sobre la amenaza
-    - Proporciona medidas de mitigación ESPECÍFICAS y PRÁCTICAS
-    - Incluye timeline recomendado para implementar las medidas
-    - Responde SOLO con los resultados, sin texto adicional al supervisor""",
+    - Usa procura na web para obter informação atualizada sobre a amenaça
+    - Proporciona medidas de mitigação ESPECÍFICAS e PRÁCTICAS
+    - Inclui timeline recomendado para implementar as medidas
+    - Responde SÓ con os resultados, sem texto adicional ao supervisor""",
     name="threat_analyzer"
 )
 
@@ -103,61 +103,61 @@ threat_analyzer = create_react_agent(
 notification_agent = create_react_agent(
     model=llm,
     tools=gmail_tools,
-    prompt="""Eres el especialista en comunicaciones y notificaciones del SOC.
+    prompt="""És o especialista em cibersegurança do SOC.
     
-    HERRAMIENTAS DISPONIBLES (GmailToolkit):
+    FERRAMENTAS DISPONIVEIS (GmailToolkit):
     - gmail_send_message: Envía emails directamente usando Gmail API
-    - gmail_create_draft: Crea borradores de email 
-    - gmail_search: Busca emails existentes
-    - gmail_get_message: Obtiene mensajes específicos
+    - gmail_create_draft: Cria rascunhos de email 
+    - gmail_search: Procura emails existentes
+    - gmail_get_message: Obtém mensagens específicos
     
     HERRAMIENTA PRINCIPAL A USAR: gmail_send_message
     
-    PROCESO DE NOTIFICACIÓN OBLIGATORIO:
-    1. Analizar toda la información previa para determinar urgencia del mensaje
-    2. Crear asunto de email claro, específico y que refleje la prioridad correcta
-    3. Redactar cuerpo del mensaje profesional y completo incluyendo:
-       - Resumen ejecutivo del incidente
-       - Detalles técnicos del análisis realizado
-       - Nivel de amenaza y impacto potencial identificado
-       - Acciones de mitigación recomendadas por el equipo
-       - Timeline para implementación de medidas
-       - Información de contacto para seguimiento
-    4. EJECUTAR gmail_send_message con estos parámetros exactos:
-       - to: "engineer.education.colab@gmail.com" (o email especificado en contexto)
-       - subject: "[Asunto según severidad]"
-       - message: "[Cuerpo completo del email]"
+    PROCESSO DE NOTIFICACÇÃO OBRIGATÓRIO:
+    1. Analizar toda a informação prévia para determinar urgência da mensagem
+    2. Cria assunto de email claro, específico e que refleje a prioridade correta
+    3. Redatar corpo da mensagem profissional e completo incluindo:
+       - Resumen executivo do incidente
+       - Detalhes técnicos da análise realizada
+       - Nivel de amenaça e impacto potencial identificado
+       - Ações de mitigação recomendadas para a equipa
+       - Timeline para implementação de medidas
+       - Informação de contacto para seguimento
+    4. EJECUTAR gmail_send_message con estes parâmetros exatos:
+       - to: "serranotoc@gmail.com" (o email especificado en contexto)
+       - subject: "[Assunto según severidad]"
+       - message: "[Corpo completo do email]"
     
-    FORMATO DE ASUNTO SEGÚN SEVERIDAD:
-    - Crítico: "🚨 CRÍTICO - [Tipo de amenaza] - Acción inmediata requerida"
-    - Alto: "⚠️ ALTO - [Tipo de amenaza] - Respuesta en 2h"
-    - Medio: "📋 MEDIO - [Tipo de amenaza] - Respuesta en 24h"  
-    - Bajo: "ℹ️ BAJO - [Tipo de amenaza] - Para revisión"
-    - Falso Positivo: "✅ INFO - Falso Positivo - [ID] - Para conocimiento"
+    FORMATO DE ASSUNTO SEGUNDO SEVERIDADE:
+    - Crítico: "🚨 CRÍTICO - [Tipo de ameaça] - Ação inmediata requerida"
+    - Alto: "⚠️ ALTO - [Tipo de ameaça] - Resposta em 2h"
+    - Médio: "📋 MEDIO - [Tipo de ameaça] - Resposta em 24h"  
+    - Baixo: "ℹ️ BAJO - [Tipo de ameaça] - Para revisão"
+    - Falso Positivo: "✅ INFO - Falso Positivo - [ID] - Para conhecimentop"
     
-    FORMATO DEL EMAIL (IMPORTANTE - USA HTML):
+    FORMATO DO EMAIL (IMPORTANTE - USA HTML):
     
-    Para el campo 'message' usa este formato HTML que se verá correctamente en Gmail:
+    Para o campo 'message' usa este formato HTML que se verá corretamente no Gmail:
     
     <html>
     <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
     
-    <h2 style="color: #d32f2f;">🚨 RESUMEN EJECUTIVO</h2>
+    <h2 style="color: #d32f2f;">🚨 RESUMO EXECUTIVO</h2>
     <p><strong>ID Incidente:</strong> [ID]</p>
-    <p><strong>Severidad:</strong> [NIVEL]</p>
+    <p><strong>Severidade:</strong> [NIVEL]</p>
     <p><strong>Estado:</strong> [VERDADERO POSITIVO/FALSO POSITIVO]</p>
     
     <h3 style="color: #1976d2;">📊 DETALLES TÉCNICOS</h3>
-    <p>[Información del análisis con saltos de línea como párrafos separados]</p>
+    <p>[Informação da análise com saltos de linha com parágrafos separados]</p>
     
-    <h3 style="color: #388e3c;">🔧 ACCIONES RECOMENDADAS</h3>
+    <h3 style="color: #388e3c;">🔧 AÇÕES RECOMENDADAS</h3>
     <ul>
-    <li>Acción inmediata 1</li>
-    <li>Acción inmediata 2</li>
+    <li>Ação imediata 1</li>
+    <li>Ação imediata 2</li>
     </ul>
     
     <h3 style="color: #f57c00;">📅 TIMELINE</h3>
-    <p>Implementar en: [TIEMPO]</p>
+    <p>Implementar em: [TIEMPO]</p>
     
     <hr style="margin: 20px 0;">
     <p style="font-size: 12px; color: #666;">
@@ -169,13 +169,13 @@ notification_agent = create_react_agent(
     </body>
     </html>
     
-    INSTRUCCIONES ESPECÍFICAS:
-    - USA EXCLUSIVAMENTE gmail_send_message para enviar el email
-    - NO uses gmail_create_draft a menos que falle gmail_send_message
-    - El parámetro "to" debe ser una dirección de email válida
-    - El parámetro "subject" debe ser el asunto completo
-    - El parámetro "message" debe ser el cuerpo completo en texto plano
-    - Si gmail_send_message falla, inténtalo UNA vez más con parámetros simplificados
+    INSTRUÇÕES ESPECÍFICAS:
+    - USA EXCLUSIVAMENTE gmail_send_message para enviar o email
+    - NÃO uses gmail_create_draft a não ser que falhe gmail_send_message
+    - O parámetro "to" deve ser uma direção de email válida
+    - O parámetro "subject" deve ser o asunto completo
+    - O parámetro "message" deve ser o corpo completo com texto plano
+    - Se gmail_send_message falha, tenta UMA vez mais com parámetros simplificados
     
     RESPOSTA FINAL:
     - Confirma que usaste gmail_send_message
