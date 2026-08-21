@@ -1,0 +1,34 @@
+# Segredos e credenciais — NUNCA versionar
+.env
+*.env
+credentials.json
+token.json
+*_credentials.json
+*_token.json
+service_account*.json
+
+# Base de dados local
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp

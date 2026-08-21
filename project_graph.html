@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<title>MESI SOC Platform — Grafo do Projeto</title>
+<script src="https://unpkg.com/vis-network@9.1.9/dist/vis-network.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/vis-network@9.1.9/dist/dist/vis-network.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #050d1a; color: #e6f1ff; height: 100vh; display: flex; flex-direction: column; }
+
+  header { background: #0a1628; border-bottom: 2px solid #1a3a5c; padding: 12px 20px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { color: #00d4ff; font-size: 1.1rem; }
+  header p  { color: #8899aa; font-size: 0.8rem; }
+
+  #legend { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 20px; background: #071020; border-bottom: 1px solid #1a3a5c; }
+  .leg { display: flex; align-items: center; gap: 5px; font-size: 0.72rem; color: #aabbcc; }
+  .leg-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+
+  #controls { padding: 6px 20px; background: #071020; border-bottom: 1px solid #1a3a5c; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button { background: #0c2040; border: 1px solid #1a4070; color: #00d4ff; padding: 4px 12px; border-radius: 5px; cursor: pointer; font-size: 0.75rem; transition: background .2s; }
+  button:hover { background: #1a3a6c; }
+  select { background: #0c2040; border: 1px solid #1a4070; color: #aabbcc; padding: 3px 8px; border-radius: 5px; font-size: 0.75rem; }
+  label { color: #8899aa; font-size: 0.75rem; }
+
+  #main { display: flex; flex: 1; overflow: hidden; }
+  #network { flex: 1; }
+
+  #sidebar { width: 300px; background: #071020; border-left: 1px solid #1a3a5c; display: flex; flex-direction: column; overflow: hidden; }
+  #sidebar h2 { padding: 12px 14px; color: #00d4ff; font-size: 0.85rem; border-bottom: 1px solid #1a3a5c; }
+  #info { padding: 12px 14px; overflow-y: auto; flex: 1; font-size: 0.78rem; line-height: 1.6; color: #aabbcc; }
+  #info h3 { color: #1de9b6; margin-bottom: 6px; font-size: 0.85rem; }
+  #info .tag { display: inline-block; background: #0c2040; border: 1px solid #1a4070; color: #00d4ff; border-radius: 4px; padding: 1px 6px; font-size: 0.68rem; margin: 2px 2px 2px 0; }
+  #info .conn { color: #b388ff; }
+  #info .file { color: #ffd700; font-family: monospace; }
+  #info .method { color: #69f0ae; font-family: monospace; font-size: 0.72rem; }
+  #info .ext { color: #ff7043; }
+  #info hr { border-color: #1a3a5c; margin: 8px 0; }
+  .placeholder { color: #3a5070; font-style: italic; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🛡️ MESI SOC Platform — Grafo de Arquitetura</h1>
+    <p>Clique num nó para ver detalhes · Arraste para explorar · Scroll para zoom</p>
+  </div>
+</header>
+
+<div id="legend">
+  <div class="leg"><div class="leg-dot" style="background:#00d4ff"></div> Entrada (API/Dashboard)</div>
+  <div class="leg"><div class="leg-dot" style="background:#69f0ae"></div> L2 ML Detection</div>
+  <div class="leg"><div class="leg-dot" style="background:#b388ff"></div> L3 Playbooks / Agentes LLM</div>
+  <div class="leg"><div class="leg-dot" style="background:#ffd700"></div> L4 XAI + HITL</div>
+  <div class="leg"><div class="leg-dot" style="background:#ff9800"></div> L5 Gamificação</div>
+  <div class="leg"><div class="leg-dot" style="background:#ff5252"></div> L6 SOAR</div>
+  <div class="leg"><div class="leg-dot" style="background:#90caf9"></div> Base de Dados / Config</div>
+  <div class="leg"><div class="leg-dot" style="background:#f48fb1"></div> Serviços Externos</div>
+  <div class="leg"><div class="leg-dot" style="background:#4dd0e1"></div> Modelos DB (Tabelas)</div>
+</div>
+
+<div id="controls">
+  <button onclick="network.fit()">🔍 Centrar</button>
+  <button onclick="togglePhysics()">⚙️ Física</button>
+  <button onclick="filterGroup('all')">Todos</button>
+  <button onclick="filterGroup('core')">Núcleo</button>
+  <button onclick="filterGroup('db')">Base Dados</button>
+  <button onclick="filterGroup('ext')">Externos</button>
+  <label>Layout:</label>
+  <select onchange="setLayout(this.value)">
+    <option value="free">Livre</option>
+    <option value="hierarchical">Hierárquico</option>
+  </select>
+</div>
+
+<div id="main">
+  <div id="network"></div>
+  <div id="sidebar">
+    <h2>📋 Detalhes do Nó</h2>
+    <div id="info"><p class="placeholder">Clique num nó para ver informações detalhadas sobre o módulo, as suas responsabilidades e ligações.</p></div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// NODE DEFINITIONS
+// ─────────────────────────────────────────────────────────────
+const NODE_INFO = {
+  'api_main': {
+    title: 'api_main.py', layer: 'Entrada', color: '#00d4ff',
+    desc: 'FastAPI unificada — porta 8000. Ponto de entrada principal do sistema. Agrega todos os módulos e expõe os endpoints REST.',
+    endpoints: ['POST /api/alerts (pipeline L1→L6)', 'GET /api/incidents', 'GET/POST /api/hitl/*', 'GET/POST /api/playbooks/*', 'GET/POST/PUT/DELETE /api/assets', 'GET/POST /api/users', 'GET/POST /api/gamification/*', 'GET /api/soar/*', 'GET /api/analytics/overview', 'GET /health'],
+    imports: ['database', 'gamification', 'ml_detection', 'playbook_engine', 'soar_executor', 'xai_hitl', 'config'],
+    schema: ['AlertIn', 'AssetIn', 'UserIn', 'HITLReviewIn', 'PlaybookGenerateIn', 'MissionAnswerIn', 'ScenarioGenerateIn'],
+    tags: ['FastAPI', 'Uvicorn', 'REST', 'CORS', 'Pydantic']
+  },
+  'dashboard': {
+    title: 'dashboard.py', layer: 'Entrada', color: '#00d4ff',
+    desc: 'Dashboard Streamlit — porta 8501. Interface web com 6 tabs: SOC Operations, Ativos, Playbooks, XAI/HITL, Gamificação, Analytics.',
+    tabs: ['🚨 SOC Operations (pipeline L1→L6)', '🖥️ Ativos (CRUD)', '📋 Playbooks (biblioteca + geração IA)', '🔬 XAI / HITL (fila revisão humana)', '🎮 Gamificação (missões, leaderboard)', '📊 Analytics (métricas globais)'],
+    imports: ['requests → API_BASE (http://localhost:8000)'],
+    tags: ['Streamlit', 'HTTP/REST Client', 'UI']
+  },
+  'database': {
+    title: 'database.py', layer: 'Infraestrutura', color: '#90caf9',
+    desc: 'Camada de persistência SQLAlchemy + SQLite. Define todos os modelos ORM e seed de dados iniciais.',
+    models: ['Asset', 'User', 'Incident', 'Playbook', 'GamificationMission', 'UserMission', 'TelemetryLog'],
+    seed: ['4 utilizadores demo', '5 ativos demo', '6 playbooks padrão (PB-001 a PB-006)'],
+    tags: ['SQLAlchemy', 'SQLite', 'ORM', 'soc_database.db']
+  },
+  'config': {
+    title: 'config.py', layer: 'Infraestrutura', color: '#90caf9',
+    desc: 'Configuração centralizada via variáveis de ambiente (.env). Valida chaves opcionais de APIs externas.',
+    keys: ['OPENAI_API_KEY', 'TAVILY_API_KEY', 'VIRUSTOTAL_API_KEY', 'GMAIL_TOKEN_FILE', 'GMAIL_CREDENTIALS_FILE', 'SOC_EMAIL_RECIPIENT'],
+    constants: ['WEBHOOK_PORT=8000', 'DASHBOARD_PORT=8501', 'HITL_SLA_CRITICAL=15min', 'HITL_SLA_HIGH=30min', 'HITL_SLA_NORMAL=60min'],
+    tags: ['dotenv', 'Config singleton']
+  },
+  'ml_detection': {
+    title: 'ml_detection.py', layer: 'L2 — Deteção ML', color: '#69f0ae',
+    desc: 'Camada L2. Detetor de anomalias com Isolation Forest (200 estimadores). Treina em 1500 amostras sintéticas no arranque. Sem dados externos necessários.',
+    features: ['hora_dia', 'tem_ip_origem', 'tem_url', 'tem_hash', 'comprimento_descricao', 'nivel_severidade', 'porta_suspeita', 'score_tipo_ameaca', 'fora_horario_laboral', 'multiplos_iocs'],
+    threats: ['ransomware/apt (5)', 'malware/intrusion (4)', 'phishing/brute_force/dos (3)', 'scan/recon (2)'],
+    suspiciousPorts: ['22, 23, 445, 3389, 4444, 8080, 9999, 1337, 31337'],
+    output: 'detect() → (anomaly_score 0-1, is_anomaly bool, explanation dict)',
+    tags: ['scikit-learn', 'IsolationForest', 'StandardScaler', 'numpy']
+  },
+  'xai_hitl': {
+    title: 'xai_hitl.py', layer: 'L4 — XAI + HITL', color: '#ffd700',
+    desc: 'Camada L4. XAIExplainer gera explicações legíveis pelo analista. HITLManager gere a fila de revisão humana com SLAs.',
+    classes: ['XAIExplainer.explain(alert, ml_result) → XAI report', 'HITLManager.request_review(incident_id, ...)', 'HITLManager.submit_review(id, analyst, decision, notes)', 'HITLManager.stats()'],
+    trigger: 'Threshold: score > 0.50 ou is_anomaly=True',
+    sla: ['score>0.70 → SLA 15min (CRÍTICO)', 'score>0.50 → SLA 30min', 'else → SLA 60min'],
+    decisions: ['VERDADEIRO_POSITIVO', 'FALSO_POSITIVO', 'ESCALAR'],
+    tags: ['XAI', 'HITL', 'Decision path', 'SLA']
+  },
+  'playbook_engine': {
+    title: 'playbook_engine.py', layer: 'L3 — RAG + LLM', color: '#b388ff',
+    desc: 'Camada L3. RAG com TF-IDF (sem vector store externo) sobre 7 playbooks built-in. Geração personalizada com GPT-4o-mini.',
+    library: ['PB-001 Malware', 'PB-002 Phishing', 'PB-003 Ransomware', 'PB-004 Intrusão', 'PB-005 DDoS', 'PB-006 Exfiltração Dados', 'PB-007 Comprometimento de Conta'],
+    methods: ['retrieve(query, top_k) → TF-IDF cosine similarity', 'generate(desc, threat, severity, context) → RAG + GPT-4o-mini', 'get_library() → lista completa'],
+    tags: ['TF-IDF', 'cosine_similarity', 'GPT-4o-mini', 'RAG', 'scikit-learn']
+  },
+  'agents': {
+    title: 'agents.py', layer: 'L3 — Agentes LLM', color: '#b388ff',
+    desc: 'Camada L3. Três agentes LangGraph ReAct com ferramentas reais. Orquestrados pelo supervisor.py.',
+    agents: ['alert_analyzer — IOC analysis via VirusTotal + TavilySearch → VERDADEIRO/FALSO POSITIVO', 'threat_analyzer — TTP research via TavilySearch → severidade + mitigação', 'notification_agent — Gmail API → email HTML estruturado por severidade'],
+    tags: ['LangGraph', 'ReAct', 'GPT-4o-mini', 'LangChain']
+  },
+  'supervisor': {
+    title: 'supervisor.py', layer: 'L3 — Supervisor', color: '#b388ff',
+    desc: 'Supervisor LangGraph multi-agente. Coordena sequencialmente: alert_analyzer → threat_analyzer → notification_agent. Máximo 3 delegações por alerta.',
+    flow: ['1. alert_analyzer (IOC + VirusTotal + Tavily)', '2. Se VP → threat_analyzer | Se FP → skip', '3. notification_agent (Gmail)'],
+    output: 'process_security_alert(alert_data, incident_id) → dict completo',
+    tags: ['langgraph-supervisor', 'multi-agent', 'GPT-4o-mini']
+  },
+  'gamification': {
+    title: 'gamification.py', layer: 'L5 — Gamificação', color: '#ff9800',
+    desc: 'Camada L5. Motor de gamificação com 5 cenários built-in e geração LLM. Calcula XP, níveis, badges e Human Risk Score.',
+    scenarios: ['SC-001 Email Suspeito (phishing, INICIANTE, 50XP)', 'SC-002 Ficheiros Encriptados (ransomware, INTERMEDIO, 150XP)', 'SC-003 Acesso 3h Manhã (intrusion, AVANCADO, 250XP)', 'SC-004 Pen Drive Encontrada (social_eng, INICIANTE, 60XP)', 'SC-005 Password Partilhada (social_eng, INICIANTE, 40XP)'],
+    levels: 'LEVEL_THRESHOLDS: [0,100,250,500,1000,2000,3500,5000,7500,10000,15000] → 11 níveis',
+    badges: ['PRIMEIRO_PASSO', 'CAÇADOR_AMEAÇAS (10 missões)', 'DEFENSOR (5 perfeitos)', 'RESPOSTA_RAPIDA (<3min)', 'ESPECIALISTA_SOC (nível 10)', 'ZERO_RISCOS (score=0)'],
+    riskScore: 'base=50 − training(−30max) − performance(−0.15×%) + incident_penalty(+20)',
+    tags: ['GPT-4o-mini', 'LangChain', 'XP', 'Risk Score', 'Badges']
+  },
+  'soar_executor': {
+    title: 'soar_executor.py', layer: 'L6 — SOAR', color: '#ff5252',
+    desc: 'Camada L6. Orquestração e resposta automática. Catálogo de 11 ações standard + extras por tipo de ameaça. Execução simulada.',
+    catalog: ['create_ticket (auto, BAIXA+)', 'block_ip (auto, MEDIA+)', 'quarantine_email (auto, MEDIA+)', 'collect_forensics (auto, MEDIA+)', 'update_threat_intel (auto, MEDIA+)', 'isolate_host (auto, ALTA+)', 'disable_account (manual, ALTA+)', 'force_password_reset (manual, ALTA+)', 'notify_management (auto, CRITICA)', 'activate_ir_team (auto, CRITICA)', 'initiate_drp (manual, CRITICA)'],
+    extras: ['ransomware → emergency_backup', 'phishing → user_awareness_broadcast', 'data_exfiltration → gdpr_notification_workflow', 'ddos → activate_ddos_protection + cdn_failover', 'intrusion → revoke_all_sessions'],
+    tags: ['SOAR', 'Automation', 'Simulation', 'IR']
+  },
+  'tools': {
+    title: 'tools.py', layer: 'Ferramentas Externas', color: '#f48fb1',
+    desc: 'Adaptadores para APIs externas. Inicialização condicional — apenas disponíveis se chaves configuradas em .env.',
+    tools: ['TavilySearch (max_results=3) — pesquisa web em tempo real', 'virustotal_checker(indicator, type) — análise URL/IP/hash', 'GmailToolkit — send/draft/search/get messages'],
+    tags: ['VirusTotal API', 'Tavily API', 'Gmail API', 'LangChain tools']
+  },
+  // DB Models
+  'Asset': { title: 'Asset (tabela)', layer: 'DB Model', color: '#4dd0e1', desc: 'Ativos da empresa. Campos: name, asset_type, ip_address, mac_address, hostname, owner, department, criticality (CRITICO/ALTO/MEDIO/BAIXO), os_system, location, tags, is_active.', tags: ['SQLAlchemy', 'assets'] },
+  'User': { title: 'User (tabela)', layer: 'DB Model', color: '#4dd0e1', desc: 'Colaboradores/analistas. Campos: username, email, full_name, role (soc_analyst/employee/manager/admin), department, level, xp_points, total_missions, missions_completed, risk_score (0-100), badges.', tags: ['SQLAlchemy', 'users'] },
+  'Incident': { title: 'Incident (tabela)', layer: 'DB Model', color: '#4dd0e1', desc: 'Incidentes de segurança. Campos: incident_id, title, severity, status (open/investigating/resolved/closed), is_true_positive, ml_score, ml_explanation, playbook_id, soar_actions, hitl_required, hitl_reviewed, reviewer_decision.', tags: ['SQLAlchemy', 'incidents'] },
+  'Playbook': { title: 'Playbook (tabela)', layer: 'DB Model', color: '#4dd0e1', desc: 'Playbooks de resposta. Campos: playbook_id, name, threat_type, severity_level, steps[], priority_actions[], tags[], is_generated, usage_count.', tags: ['SQLAlchemy', 'playbooks'] },
+  'GamificationMission': { title: 'GamificationMission', layer: 'DB Model', color: '#4dd0e1', desc: 'Missões de treino. Campos: mission_id, title, scenario_type, difficulty, xp_reward, based_on_incident, scenario_data (perguntas+opções+respostas).', tags: ['SQLAlchemy', 'gamification_missions'] },
+  'UserMission': { title: 'UserMission (tabela)', layer: 'DB Model', color: '#4dd0e1', desc: 'Registo de tentativas de missão por utilizador. FK: user_id → User, mission_id → GamificationMission. Campos: status, score_percentage, xp_earned, answers.', tags: ['SQLAlchemy', 'user_missions'] },
+  'TelemetryLog': { title: 'TelemetryLog (tabela)', layer: 'DB Model', color: '#4dd0e1', desc: 'Log de eventos de telemetria. Campos: source (siem/firewall/endpoint/network/email), event_type, source_ip, destination_ip, raw_data, ml_score, is_anomaly, incident_id.', tags: ['SQLAlchemy', 'telemetry_logs'] },
+  // External services
+  'openai': { title: 'OpenAI GPT-4o-mini', layer: 'Serviço Externo', color: '#f48fb1', desc: 'LLM usado por: playbook_engine (geração RAG), gamification (geração cenários), agents (alert_analyzer, threat_analyzer, notification_agent), supervisor.', tags: ['GPT-4o-mini', 'LangChain', 'LangGraph'] },
+  'virustotal': { title: 'VirusTotal API', layer: 'Serviço Externo', color: '#f48fb1', desc: 'Análise de IOCs (IPs, URLs, hashes). Usado pelo alert_analyzer via tools.py. Retorna: detections maliciosas/suspeitas/total, classificação MALICIOSO/SUSPEITO/LIMPO.', tags: ['vt-py', 'Threat Intel'] },
+  'tavily': { title: 'TavilySearch API', layer: 'Serviço Externo', color: '#f48fb1', desc: 'Pesquisa web em tempo real para contexto de ameaças, TTPs, campanhas. Usado por alert_analyzer e threat_analyzer.', tags: ['langchain-tavily', 'Web Search'] },
+  'gmail': { title: 'Gmail API', layer: 'Serviço Externo', color: '#f48fb1', desc: 'Envio de notificações de incidentes por email HTML. Usado pelo notification_agent. Formato: assunto por severidade (🚨 CRÍTICO / ⚠️ ALTO / 📋 MÉDIO).', tags: ['google-api', 'GmailToolkit', 'OAuth2'] },
+  'sqlite': { title: 'SQLite (soc_database.db)', layer: 'Serviço Externo', color: '#90caf9', desc: 'Base de dados local SQLite. Contém 7 tabelas: assets, users, incidents, playbooks, gamification_missions, user_missions, telemetry_logs. Auto-inicializa com seed data no arranque.', tags: ['SQLite', 'SQLAlchemy'] },
+};
+
+// ─────────────────────────────────────────────────────────────
+// VIS.JS NODES
+// ─────────────────────────────────────────────────────────────
+const nodes = new vis.DataSet([
+  // ── Entry points ──
+  { id: 'api_main',   label: 'api_main.py\n:8000',    group: 'entry',  color: { background:'#003d5c', border:'#00d4ff', highlight:{background:'#005580',border:'#00ffff'} }, font:{color:'#00d4ff',size:13,bold:true}, shape:'box', size:28 },
+  { id: 'dashboard',  label: 'dashboard.py\n:8501',    group: 'entry',  color: { background:'#003d5c', border:'#00d4ff', highlight:{background:'#005580',border:'#00ffff'} }, font:{color:'#00d4ff',size:13,bold:true}, shape:'box', size:28 },
+
+  // ── Infrastructure ──
+  { id: 'database',   label: 'database.py\nSQLAlchemy',  group: 'infra',  color: { background:'#1a2d4a', border:'#90caf9', highlight:{background:'#243d5f',border:'#bbdefb'} }, font:{color:'#90caf9',size:12}, shape:'cylinder' },
+  { id: 'config',     label: 'config.py\n.env',          group: 'infra',  color: { background:'#1a2d4a', border:'#90caf9', highlight:{background:'#243d5f',border:'#bbdefb'} }, font:{color:'#90caf9',size:12}, shape:'cylinder' },
+
+  // ── L2 ──
+  { id: 'ml_detection', label: 'L2 ml_detection.py\nIsolation Forest', group: 'l2', color: { background:'#0a2e1a', border:'#69f0ae', highlight:{background:'#0f3d24',border:'#b9f6ca'} }, font:{color:'#69f0ae',size:12,bold:true}, shape:'ellipse' },
+
+  // ── L3 ──
+  { id: 'playbook_engine', label: 'L3 playbook_engine.py\nRAG + TF-IDF', group: 'l3', color: { background:'#1e1040', border:'#b388ff', highlight:{background:'#2a1a5e',border:'#e1bee7'} }, font:{color:'#b388ff',size:12,bold:true}, shape:'ellipse' },
+  { id: 'agents',          label: 'L3 agents.py\n3 Agentes LLM',        group: 'l3', color: { background:'#1e1040', border:'#b388ff', highlight:{background:'#2a1a5e',border:'#e1bee7'} }, font:{color:'#b388ff',size:12,bold:true}, shape:'ellipse' },
+  { id: 'supervisor',      label: 'L3 supervisor.py\nMulti-Agent',       group: 'l3', color: { background:'#1e1040', border:'#b388ff', highlight:{background:'#2a1a5e',border:'#e1bee7'} }, font:{color:'#b388ff',size:12,bold:true}, shape:'ellipse' },
+
+  // ── L4 ──
+  { id: 'xai_hitl', label: 'L4 xai_hitl.py\nXAI + HITL Queue', group: 'l4', color: { background:'#2e2400', border:'#ffd700', highlight:{background:'#3d3000',border:'#ffe57f'} }, font:{color:'#ffd700',size:12,bold:true}, shape:'ellipse' },
+
+  // ── L5 ──
+  { id: 'gamification', label: 'L5 gamification.py\nMissions + Risk Score', group: 'l5', color: { background:'#2e1200', border:'#ff9800', highlight:{background:'#3d1900',border:'#ffcc80'} }, font:{color:'#ff9800',size:12,bold:true}, shape:'ellipse' },
+
+  // ── L6 ──
+  { id: 'soar_executor', label: 'L6 soar_executor.py\nSOAR Actions', group: 'l6', color: { background:'#2e0808', border:'#ff5252', highlight:{background:'#3d0f0f',border:'#ff8a80'} }, font:{color:'#ff5252',size:12,bold:true}, shape:'ellipse' },
+
+  // ── Tools ──
+  { id: 'tools', label: 'tools.py\nAdaptadores APIs', group: 'tools', color: { background:'#2e1a20', border:'#f48fb1', highlight:{background:'#3d2230',border:'#f8bbd0'} }, font:{color:'#f48fb1',size:12}, shape:'diamond' },
+
+  // ── DB Models ──
+  { id: 'Asset',               label: 'Asset',               group: 'dbmodel', color:{background:'#042028',border:'#4dd0e1',highlight:{background:'#06303c',border:'#80deea'}}, font:{color:'#4dd0e1',size:11}, shape:'box', size:18 },
+  { id: 'User',                label: 'User',                group: 'dbmodel', color:{background:'#042028',border:'#4dd0e1',highlight:{background:'#06303c',border:'#80deea'}}, font:{color:'#4dd0e1',size:11}, shape:'box', size:18 },
+  { id: 'Incident',            label: 'Incident',            group: 'dbmodel', color:{background:'#042028',border:'#4dd0e1',highlight:{background:'#06303c',border:'#80deea'}}, font:{color:'#4dd0e1',size:11}, shape:'box', size:18 },
+  { id: 'Playbook',            label: 'Playbook',            group: 'dbmodel', color:{background:'#042028',border:'#4dd0e1',highlight:{background:'#06303c',border:'#80deea'}}, font:{color:'#4dd0e1',size:11}, shape:'box', size:18 },
+  { id: 'GamificationMission', label: 'GamificationMission', group: 'dbmodel', color:{background:'#042028',border:'#4dd0e1',highlight:{background:'#06303c',border:'#80deea'}}, font:{color:'#4dd0e1',size:11}, shape:'box', size:18 },
+  { id: 'UserMission',         label: 'UserMission',         group: 'dbmodel', color:{background:'#042028',border:'#4dd0e1',highlight:{background:'#06303c',border:'#80deea'}}, font:{color:'#4dd0e1',size:11}, shape:'box', size:18 },
+  { id: 'TelemetryLog',        label: 'TelemetryLog',        group: 'dbmodel', color:{background:'#042028',border:'#4dd0e1',highlight:{background:'#06303c',border:'#80deea'}}, font:{color:'#4dd0e1',size:11}, shape:'box', size:18 },
+
+  // ── External Services ──
+  { id: 'openai',      label: 'OpenAI\nGPT-4o-mini',     group: 'ext', color:{background:'#1a0830',border:'#f48fb1',highlight:{background:'#240f40',border:'#f8bbd0'}}, font:{color:'#f48fb1',size:11}, shape:'triangle', size:22 },
+  { id: 'virustotal',  label: 'VirusTotal\nAPI',          group: 'ext', color:{background:'#1a0830',border:'#f48fb1',highlight:{background:'#240f40',border:'#f8bbd0'}}, font:{color:'#f48fb1',size:11}, shape:'triangle', size:22 },
+  { id: 'tavily',      label: 'TavilySearch\nAPI',        group: 'ext', color:{background:'#1a0830',border:'#f48fb1',highlight:{background:'#240f40',border:'#f8bbd0'}}, font:{color:'#f48fb1',size:11}, shape:'triangle', size:22 },
+  { id: 'gmail',       label: 'Gmail\nAPI',               group: 'ext', color:{background:'#1a0830',border:'#f48fb1',highlight:{background:'#240f40',border:'#f8bbd0'}}, font:{color:'#f48fb1',size:11}, shape:'triangle', size:22 },
+  { id: 'sqlite',      label: 'SQLite\nsoc_database.db',  group: 'ext', color:{background:'#1a2d4a',border:'#90caf9',highlight:{background:'#243d5f',border:'#bbdefb'}}, font:{color:'#90caf9',size:11}, shape:'triangle', size:22 },
+]);
+
+// ─────────────────────────────────────────────────────────────
+// EDGES
+// ─────────────────────────────────────────────────────────────
+const edges = new vis.DataSet([
+  // Dashboard → API (HTTP)
+  { from:'dashboard', to:'api_main', label:'HTTP REST', color:{color:'#00d4ff',opacity:0.7}, dashes:true, arrows:'to', font:{color:'#00d4ff',size:9} },
+
+  // api_main → modules (imports)
+  { from:'api_main', to:'ml_detection',    label:'L2 detect()', color:{color:'#69f0ae',opacity:0.8}, arrows:'to', font:{color:'#69f0ae',size:9} },
+  { from:'api_main', to:'xai_hitl',        label:'L4 explain()',  color:{color:'#ffd700',opacity:0.8}, arrows:'to', font:{color:'#ffd700',size:9} },
+  { from:'api_main', to:'playbook_engine', label:'L3 retrieve()', color:{color:'#b388ff',opacity:0.8}, arrows:'to', font:{color:'#b388ff',size:9} },
+  { from:'api_main', to:'soar_executor',   label:'L6 plan()+execute()', color:{color:'#ff5252',opacity:0.8}, arrows:'to', font:{color:'#ff5252',size:9} },
+  { from:'api_main', to:'gamification',    label:'L5 evaluate()', color:{color:'#ff9800',opacity:0.8}, arrows:'to', font:{color:'#ff9800',size:9} },
+  { from:'api_main', to:'database',        label:'SQLAlchemy ORM', color:{color:'#90caf9',opacity:0.7}, arrows:'to', font:{color:'#90caf9',size:9} },
+  { from:'api_main', to:'xai_hitl',        color:{color:'#ffd700',opacity:0.5}, arrows:'to' },
+
+  // L1→L6 pipeline (POST /api/alerts)
+  { from:'ml_detection',    to:'xai_hitl',        label:'anomaly_score', color:{color:'#a0a0ff',opacity:0.6}, arrows:'to', dashes:[5,3], font:{color:'#a0a0ff',size:9} },
+  { from:'xai_hitl',        to:'playbook_engine', label:'requires_hitl', color:{color:'#a0a0ff',opacity:0.6}, arrows:'to', dashes:[5,3], font:{color:'#a0a0ff',size:9} },
+  { from:'xai_hitl',        to:'soar_executor',   label:'→ SOAR',        color:{color:'#a0a0ff',opacity:0.6}, arrows:'to', dashes:[5,3], font:{color:'#a0a0ff',size:9} },
+
+  // supervisor → agents
+  { from:'supervisor', to:'agents', label:'coordina', color:{color:'#b388ff',opacity:0.8}, arrows:'to', font:{color:'#b388ff',size:9} },
+  { from:'api_main',   to:'supervisor', label:'run_llm_pipeline', color:{color:'#b388ff',opacity:0.6}, arrows:'to', dashes:true, font:{color:'#b388ff',size:9} },
+
+  // agents → tools
+  { from:'agents', to:'tools', label:'usa ferramentas', color:{color:'#f48fb1',opacity:0.7}, arrows:'to', font:{color:'#f48fb1',size:9} },
+
+  // tools → external
+  { from:'tools', to:'virustotal', color:{color:'#f48fb1',opacity:0.7}, arrows:'to', label:'vt-py' , font:{color:'#f48fb1',size:9} },
+  { from:'tools', to:'tavily',     color:{color:'#f48fb1',opacity:0.7}, arrows:'to', label:'search', font:{color:'#f48fb1',size:9} },
+  { from:'tools', to:'gmail',      color:{color:'#f48fb1',opacity:0.7}, arrows:'to', label:'send'  , font:{color:'#f48fb1',size:9} },
+
+  // LLM modules → OpenAI
+  { from:'playbook_engine', to:'openai', label:'generate()',   color:{color:'#f48fb1',opacity:0.6}, arrows:'to', dashes:true, font:{color:'#f48fb1',size:9} },
+  { from:'gamification',    to:'openai', label:'scenario LLM', color:{color:'#f48fb1',opacity:0.6}, arrows:'to', dashes:true, font:{color:'#f48fb1',size:9} },
+  { from:'agents',          to:'openai', label:'GPT-4o-mini',  color:{color:'#f48fb1',opacity:0.6}, arrows:'to', dashes:true, font:{color:'#f48fb1',size:9} },
+  { from:'supervisor',      to:'openai', color:{color:'#f48fb1',opacity:0.4}, arrows:'to', dashes:true },
+
+  // config → modules
+  { from:'config', to:'playbook_engine', color:{color:'#90caf9',opacity:0.4}, arrows:'to', dashes:[2,4] },
+  { from:'config', to:'gamification',    color:{color:'#90caf9',opacity:0.4}, arrows:'to', dashes:[2,4] },
+  { from:'config', to:'agents',          color:{color:'#90caf9',opacity:0.4}, arrows:'to', dashes:[2,4] },
+  { from:'config', to:'tools',           color:{color:'#90caf9',opacity:0.4}, arrows:'to', dashes:[2,4] },
+  { from:'config', to:'supervisor',      color:{color:'#90caf9',opacity:0.4}, arrows:'to', dashes:[2,4] },
+
+  // database → DB models
+  { from:'database', to:'Asset',               color:{color:'#4dd0e1',opacity:0.5}, arrows:'to' },
+  { from:'database', to:'User',                color:{color:'#4dd0e1',opacity:0.5}, arrows:'to' },
+  { from:'database', to:'Incident',            color:{color:'#4dd0e1',opacity:0.5}, arrows:'to' },
+  { from:'database', to:'Playbook',            color:{color:'#4dd0e1',opacity:0.5}, arrows:'to' },
+  { from:'database', to:'GamificationMission', color:{color:'#4dd0e1',opacity:0.5}, arrows:'to' },
+  { from:'database', to:'UserMission',         color:{color:'#4dd0e1',opacity:0.5}, arrows:'to' },
+  { from:'database', to:'TelemetryLog',        color:{color:'#4dd0e1',opacity:0.5}, arrows:'to' },
+
+  // DB model relations (FK)
+  { from:'UserMission', to:'User',                label:'FK user_id',      color:{color:'#3a6060',opacity:0.7}, arrows:'to', dashes:[3,3], font:{color:'#4dd0e1',size:9} },
+  { from:'UserMission', to:'GamificationMission', label:'FK mission_id',   color:{color:'#3a6060',opacity:0.7}, arrows:'to', dashes:[3,3], font:{color:'#4dd0e1',size:9} },
+  { from:'Incident',    to:'Playbook',            label:'playbook_id ref', color:{color:'#3a6060',opacity:0.7}, arrows:'to', dashes:[3,3], font:{color:'#4dd0e1',size:9} },
+
+  // database → SQLite
+  { from:'database', to:'sqlite', label:'soc_database.db', color:{color:'#90caf9',opacity:0.5}, arrows:'to', font:{color:'#90caf9',size:9} },
+]);
+
+// ─────────────────────────────────────────────────────────────
+// NETWORK OPTIONS
+// ─────────────────────────────────────────────────────────────
+const options = {
+  nodes: { borderWidth: 2, shadow: true, font: { face: 'Segoe UI' } },
+  edges: { smooth: { type: 'curvedCW', roundness: 0.15 }, font: { face: 'Segoe UI', size: 9, strokeWidth: 2, strokeColor: '#050d1a' }, width: 1.5 },
+  physics: { enabled: true, barnesHut: { gravitationalConstant: -4000, centralGravity: 0.2, springLength: 160, springConstant: 0.04, damping: 0.12 }, stabilization: { iterations: 300 } },
+  interaction: { hover: true, tooltipDelay: 150, navigationButtons: true, keyboard: true },
+  layout: { randomSeed: 42 }
+};
+
+const container = document.getElementById('network');
+const network = new vis.Network(container, { nodes, edges }, options);
+
+// ─────────────────────────────────────────────────────────────
+// SIDEBAR INFO
+// ─────────────────────────────────────────────────────────────
+network.on('click', function(params) {
+  if (!params.nodes.length) return;
+  const id = params.nodes[0];
+  const info = NODE_INFO[id];
+  if (!info) return;
+
+  let html = `<h3>${info.title}</h3>`;
+  html += `<span class="tag">${info.layer}</span> `;
+  (info.tags||[]).forEach(t => html += `<span class="tag">${t}</span> `);
+  html += `<hr><p>${info.desc}</p>`;
+
+  if (info.endpoints) { html += `<hr><b>Endpoints:</b><ul>`; info.endpoints.forEach(e => html += `<li class="method">${e}</li>`); html += `</ul>`; }
+  if (info.imports)   { html += `<hr><b>Importa:</b><ul>`; info.imports.forEach(i => html += `<li class="conn">${i}</li>`); html += `</ul>`; }
+  if (info.schema)    { html += `<hr><b>Schemas Pydantic:</b><ul>`; info.schema.forEach(s => html += `<li class="file">${s}</li>`); html += `</ul>`; }
+  if (info.models)    { html += `<hr><b>Modelos ORM:</b><ul>`; info.models.forEach(m => html += `<li class="file">${m}</li>`); html += `</ul>`; }
+  if (info.seed)      { html += `<hr><b>Seed Data:</b><ul>`; info.seed.forEach(s => html += `<li>${s}</li>`); html += `</ul>`; }
+  if (info.features)  { html += `<hr><b>Features ML:</b><ul>`; info.features.forEach(f => html += `<li class="method">${f}</li>`); html += `</ul>`; }
+  if (info.threats)   { html += `<hr><b>Scores de Ameaça:</b><ul>`; info.threats.forEach(t => html += `<li>${t}</li>`); html += `</ul>`; }
+  if (info.suspiciousPorts) { html += `<hr><b>Portas Suspeitas:</b> <span class="method">${info.suspiciousPorts}</span>`; }
+  if (info.output)    { html += `<hr><b>Output:</b> <span class="method">${info.output}</span>`; }
+  if (info.classes)   { html += `<hr><b>Classes/Métodos:</b><ul>`; info.classes.forEach(c => html += `<li class="method">${c}</li>`); html += `</ul>`; }
+  if (info.trigger)   { html += `<hr><b>Trigger HITL:</b> ${info.trigger}`; }
+  if (info.sla)       { html += `<hr><b>SLAs:</b><ul>`; info.sla.forEach(s => html += `<li>${s}</li>`); html += `</ul>`; }
+  if (info.decisions) { html += `<hr><b>Decisões:</b> <span class="method">${info.decisions.join(' | ')}</span>`; }
+  if (info.library)   { html += `<hr><b>Biblioteca RAG:</b><ul>`; info.library.forEach(l => html += `<li>${l}</li>`); html += `</ul>`; }
+  if (info.methods)   { html += `<hr><b>Métodos:</b><ul>`; info.methods.forEach(m => html += `<li class="method">${m}</li>`); html += `</ul>`; }
+  if (info.agents)    { html += `<hr><b>Agentes:</b><ul>`; info.agents.forEach(a => html += `<li>${a}</li>`); html += `</ul>`; }
+  if (info.flow)      { html += `<hr><b>Fluxo:</b><ol>`; info.flow.forEach(f => html += `<li>${f}</li>`); html += `</ol>`; }
+  if (info.catalog)   { html += `<hr><b>Catálogo SOAR:</b><ul>`; info.catalog.forEach(c => html += `<li>${c}</li>`); html += `</ul>`; }
+  if (info.extras)    { html += `<hr><b>Extras por Ameaça:</b><ul>`; info.extras.forEach(e => html += `<li>${e}</li>`); html += `</ul>`; }
+  if (info.scenarios) { html += `<hr><b>Cenários Built-in:</b><ul>`; info.scenarios.forEach(s => html += `<li>${s}</li>`); html += `</ul>`; }
+  if (info.levels)    { html += `<hr><b>Níveis:</b> ${info.levels}`; }
+  if (info.badges)    { html += `<hr><b>Badges:</b><ul>`; info.badges.forEach(b => html += `<li>${b}</li>`); html += `</ul>`; }
+  if (info.riskScore) { html += `<hr><b>Risk Score:</b> <span class="method">${info.riskScore}</span>`; }
+  if (info.tools)     { html += `<hr><b>Ferramentas:</b><ul>`; info.tools.forEach(t => html += `<li>${t}</li>`); html += `</ul>`; }
+  if (info.keys)      { html += `<hr><b>Variáveis .env:</b><ul>`; info.keys.forEach(k => html += `<li class="method">${k}</li>`); html += `</ul>`; }
+  if (info.constants) { html += `<hr><b>Constantes:</b><ul>`; info.constants.forEach(c => html += `<li class="method">${c}</li>`); html += `</ul>`; }
+  if (info.tabs)      { html += `<hr><b>Tabs:</b><ul>`; info.tabs.forEach(t => html += `<li>${t}</li>`); html += `</ul>`; }
+
+  // Show connected nodes
+  const connected = network.getConnectedNodes(id);
+  if (connected.length) {
+    html += `<hr><b>Ligações (${connected.length}):</b><ul>`;
+    connected.forEach(c => html += `<li class="conn">→ ${NODE_INFO[c]?.title || c}</li>`);
+    html += `</ul>`;
+  }
+
+  document.getElementById('info').innerHTML = html;
+});
+
+// ─────────────────────────────────────────────────────────────
+// CONTROLS
+// ─────────────────────────────────────────────────────────────
+let physicsOn = true;
+function togglePhysics() {
+  physicsOn = !physicsOn;
+  network.setOptions({ physics: { enabled: physicsOn } });
+}
+
+const ALL_GROUPS = ['entry','infra','l2','l3','l4','l5','l6','tools','dbmodel','ext'];
+const GROUP_FILTER = {
+  core: ['entry','infra','l2','l3','l4','l5','l6','tools'],
+  db:   ['infra','dbmodel','ext'],
+  ext:  ['tools','ext'],
+};
+
+function filterGroup(filter) {
+  if (filter === 'all') { nodes.getIds().forEach(id => nodes.update({ id, hidden: false })); return; }
+  const show = new Set(GROUP_FILTER[filter] || ALL_GROUPS);
+  nodes.get().forEach(n => nodes.update({ id: n.id, hidden: !show.has(n.group) }));
+}
+
+function setLayout(val) {
+  if (val === 'hierarchical') {
+    network.setOptions({ layout: { hierarchical: { enabled: true, direction:'UD', sortMethod:'directed', levelSeparation:130, nodeSpacing:120 } }, physics: { enabled: false } });
+  } else {
+    network.setOptions({ layout: { hierarchical: { enabled: false } }, physics: { enabled: true } });
+  }
+}
+
+// Center after stabilization
+network.once('stabilizationIterationsDone', () => { setTimeout(() => network.fit({ animation: { duration: 800 } }), 100); });
+</script>
+</body>
+</html>

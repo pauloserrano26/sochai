@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cd \"c:\\\\Users\\\\AE MOURA\\\\Documents\\\\Projeto_Tese_mesi\"; $env:PYTHONIOENCODING=\"utf-8\"; $result = .\\\\.venv\\\\Scripts\\\\python.exe -c \"import api_main; print\\('OK: import bem-sucedido'\\)\" 2>&1; $result)",
+      "PowerShell(python -m py_compile \"c:\\\\Users\\\\AE MOURA\\\\Documents\\\\Projeto_Tese_mesi - v2 27-6-26\\\\dashboard.py\"; echo \"EXIT:$LASTEXITCODE\")"
+    ]
+  }
+}
