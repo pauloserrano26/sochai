@@ -1,5 +1,5 @@
 """
-scenario_data.py — Catálogo de incidentes e cenários de ataque para demonstração do SOC.
+scenario_data.py — Catálogo de incidentes e cenários de ataque para demonstração do SOCHAI.
 
 CENARIOS: 12 ameaças individuais (guia INCIBE adaptado ao contexto de uma PME portuguesa),
           usadas por demo_incidentes.py (CLI) e por /api/scenarios (dashboard).

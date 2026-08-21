@@ -1,8 +1,8 @@
 @echo off
-title MESI SOC Platform
+title MESI SOCHAI Platform
 echo.
 echo  =====================================================
-echo   MESI SOC Platform - Arranque
+echo   MESI SOCHAI Platform - Arranque
 echo  =====================================================
 echo.
 

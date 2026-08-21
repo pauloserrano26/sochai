@@ -62,7 +62,7 @@ def start_api():
     global _api_proc
     kill_port_8000()
     time.sleep(1)
-    print("\n[*] A arrancar API SOC...")
+    print("\n[*] A arrancar API SOCHAI...")
     _api_proc = subprocess.Popen(
         [PYTHON, "api_main.py"],
         cwd=os.path.dirname(os.path.abspath(__file__)),
@@ -487,7 +487,7 @@ def run_tests():
 # Main
 # ================================================================== #
 print("=" * 62)
-print("  MESI SOC -- Testes de Integracao & Seguranca")
+print("  MESI SOCHAI -- Testes de Integracao & Seguranca")
 print("=" * 62)
 
 if not start_api():

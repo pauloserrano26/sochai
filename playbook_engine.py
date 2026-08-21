@@ -189,7 +189,7 @@ class PlaybookEngine:
 
         asset_section = f"\nCONTEXTO DO ATIVO AFETADO: {asset_context}" if asset_context else ""
 
-        prompt = f"""És um especialista SOC. Com base nos playbooks de referência e no incidente específico, \
+        prompt = f"""És um especialista SOCHAI. Com base nos playbooks de referência e no incidente específico, \
 gera um playbook customizado e detalhado.
 
 INCIDENTE: {incident_description}
@@ -243,7 +243,7 @@ Responde APENAS em JSON válido com esta estrutura:
                 "name": f"Playbook Genérico — {threat_type}",
                 "steps": [
                     "1. Isolar o sistema/recurso afetado",
-                    "2. Notificar a equipa SOC",
+                    "2. Notificar a equipa SOCHAI",
                     "3. Recolher logs e evidências",
                     "4. Analisar IOCs com ferramentas disponíveis",
                     "5. Aplicar medidas de contenção",
@@ -251,7 +251,7 @@ Responde APENAS em JSON válido com esta estrutura:
                     "7. Recuperar para estado normal",
                     "8. Documentar o incidente",
                 ],
-                "priority_actions": ["Isolar sistema", "Notificar SOC"],
+                "priority_actions": ["Isolar sistema", "Notificar SOCHAI"],
                 "generated": False,
                 "fallback_reason": str(exc),
             }

@@ -1,6 +1,6 @@
 ﻿"""
 SOCHAI Dashboard — Streamlit
-7 tabs: Ativos | SOC Operations | Playbooks | XAI/HITL | Gamificação | Analytics | Cenários
+7 tabs: Ativos | SOCHAI Operations | Playbooks | XAI/HITL | Gamificação | Analytics | Cenários
 """
 
 import math
@@ -93,7 +93,7 @@ def api_online() -> bool:
 # ------------------------------------------------------------------ #
 
 with st.sidebar:
-    st.markdown("# 🛡️ MESI SOC")
+    st.markdown("# 🛡️ MESI SOCHAI")
     st.markdown("**Security Operations Center**")
     st.divider()
 
@@ -124,7 +124,7 @@ with st.sidebar:
 
 tabs = st.tabs([
     "🖥️ Ativos",
-    "🚨 SOC Operations",
+    "🚨 SOCHAI Operations",
     "📋 Playbooks",
     "🔬 XAI / HITL",
     "🎮 Gamificação",
@@ -134,10 +134,10 @@ tabs = st.tabs([
 
 
 # ================================================================== #
-# TAB 2 — SOC Operations
+# TAB 2 — SOCHAI Operations
 # ================================================================== #
 with tabs[1]:
-    st.header("🚨 SOC Operations — Pipeline L1→L6")
+    st.header("🚨 SOCHAI Operations — Pipeline L1→L6")
 
     col_form, col_list = st.columns([1, 1.4], gap="large")
 
@@ -176,7 +176,7 @@ with tabs[1]:
                 if port_ioc:
                     payload["port"] = port_ioc
 
-                with st.spinner("A processar alerta no pipeline SOC..."):
+                with st.spinner("A processar alerta no pipeline SOCHAI..."):
                     result = api("post", "/api/alerts", json=payload)
 
                 if "error" in result:
@@ -798,7 +798,7 @@ with tabs[4]:
 # TAB 6 — Analytics
 # ================================================================== #
 with tabs[5]:
-    st.header("📊 Analytics & Métricas SOC")
+    st.header("📊 Analytics & Métricas SOCHAI")
 
     ov = api("get", "/api/analytics/overview")
     inc_list = api("get", "/api/incidents", params={"limit": 50})
@@ -1161,7 +1161,7 @@ with tabs[5]:
                              "Imediato", "#ff5d6c"))
         if hitl_d.get("pending_count", 0) > 0:
             actions.append(("🟡", "Revisão de alertas pendentes",
-                             f"{hitl_d['pending_count']} alerta(s) aguardam validação do analista SOC.",
+                             f"{hitl_d['pending_count']} alerta(s) aguardam validação do analista SOCHAI.",
                              "Hoje", "#f5c451"))
         if trained_pct < 80:
             actions.append(("🟡", "Aumentar cobertura de formação",

@@ -1,7 +1,7 @@
 """
 L5 - Gamification Engine
 Generates training scenarios from real incidents, manages missions,
-XP/levels, and the SOC Risk Score for human collaborators.
+XP/levels, and the SOCHAI Risk Score for human collaborators.
 """
 
 import json
@@ -37,7 +37,7 @@ BADGES: Dict[str, Dict] = {
         "description": "Completou missão em menos de 3 minutos", "xp": 0,
     },
     "ESPECIALISTA_SOC": {
-        "name": "Especialista SOC", "icon": "🏆",
+        "name": "Especialista SOCHAI", "icon": "🏆",
         "description": "Atingiu nível 10", "xp": 0,
     },
     "ZERO_RISCOS": {
@@ -46,7 +46,7 @@ BADGES: Dict[str, Dict] = {
     },
     "SENTINELA": {
         "name": "Sentinela", "icon": "📡",
-        "description": "Reportou o primeiro email suspeito ao SOC", "xp": 0,
+        "description": "Reportou o primeiro email suspeito ao SOCHAI", "xp": 0,
     },
     "OLHO_VIGILANTE": {
         "name": "Olho Vigilante", "icon": "👁️",
@@ -57,7 +57,7 @@ BADGES: Dict[str, Dict] = {
 # Recompensas de XP por reporte de phishing (modelo Cofense/PhishMe)
 REPORT_XP = {
     "malicious": 100,   # reportou uma ameaça real -> recompensa máxima
-    "simulated": 75,    # apanhou uma simulação do SOC -> ótimo
+    "simulated": 75,    # apanhou uma simulação do SOCHAI -> ótimo
     "benign": 15,       # falso alarme, mas reportar é sempre encorajado
     "pending": 10,      # ainda em triagem -> recompensa provisória
 }
@@ -134,7 +134,7 @@ _DEFAULT_SCENARIOS: List[Dict] = [
                 "correct": 1,
                 "explanation": (
                     "Nunca clique em links de emails suspeitos antes da validação "
-                    "pelo SOC. Reportar imediatamente é sempre o passo correto."
+                    "pelo SOCHAI. Reportar imediatamente é sempre o passo correto."
                 ),
             },
             {
@@ -189,20 +189,20 @@ _DEFAULT_SCENARIOS: List[Dict] = [
                 "correct": 1,
                 "explanation": (
                     "O pagamento de resgates não garante a recuperação e financia "
-                    "a criminalidade. A política do SOC é nunca pagar sem aprovação da direção."
+                    "a criminalidade. A política do SOCHAI é nunca pagar sem aprovação da direção."
                 ),
             },
             {
                 "question": "Qual é o próximo passo após isolar o sistema?",
                 "options": [
                     "Reinstalar o Windows imediatamente",
-                    "Contactar a equipa SOC e preservar evidências",
+                    "Contactar a equipa SOCHAI e preservar evidências",
                     "Tentar desinstalar o antivírus",
                     "Reiniciar o computador",
                 ],
                 "correct": 1,
                 "explanation": (
-                    "A equipa SOC deve ser contactada para coordenar a resposta, "
+                    "A equipa SOCHAI deve ser contactada para coordenar a resposta, "
                     "e as evidências devem ser preservadas para análise forense."
                 ),
             },
@@ -221,7 +221,7 @@ _DEFAULT_SCENARIOS: List[Dict] = [
         "xp_reward": 250,
         "questions": [
             {
-                "question": "Como analista SOC, qual é a prioridade imediata?",
+                "question": "Como analista SOCHAI, qual é a prioridade imediata?",
                 "options": [
                     "Aguardar mais evidências antes de agir",
                     "Enviar email ao utilizador perguntando se é ele",
@@ -279,15 +279,15 @@ _DEFAULT_SCENARIOS: List[Dict] = [
             {
                 "question": "O que deve fazer o colaborador?",
                 "options": [
-                    "Entregar a pen drive ao departamento de TI/SOC sem a conectar",
+                    "Entregar a pen drive ao departamento de TI/SOCHAI sem a conectar",
                     "Formatá-la antes de usar",
                     "Verificar o conteúdo com o antivírus instalado",
                     "Deixá-la no mesmo sítio",
                 ],
                 "correct": 0,
                 "explanation": (
-                    "A pen drive deve ser entregue ao SOC/TI sem ser conectada. "
-                    "O SOC analisará em ambiente isolado (sandbox)."
+                    "A pen drive deve ser entregue ao SOCHAI/TI sem ser conectada. "
+                    "O SOCHAI analisará em ambiente isolado (sandbox)."
                 ),
             },
         ],
@@ -307,14 +307,14 @@ _DEFAULT_SCENARIOS: List[Dict] = [
                 "question": "O que deve fazer?",
                 "options": [
                     "Dar a password porque o gestor autorizou",
-                    "Recusar e sugerir que o colega contacte o SOC/TI para acesso temporário",
+                    "Recusar e sugerir que o colega contacte o SOCHAI/TI para acesso temporário",
                     "Dar a password mas alterar depois",
                     "Pedir ao colega que espere pelo seu regresso",
                 ],
                 "correct": 1,
                 "explanation": (
                     "Nunca partilhe passwords, mesmo que seja pedido por um colega. "
-                    "O SOC/TI tem procedimentos para conceder acessos temporários de forma segura."
+                    "O SOCHAI/TI tem procedimentos para conceder acessos temporários de forma segura."
                 ),
             },
         ],
@@ -578,7 +578,7 @@ Responde APENAS em JSON válido:
         }
 
     # ------------------------------------------------------------------ #
-    # Phishing Report (modelo Cofense/PhishMe) — colaborador -> SOC
+    # Phishing Report (modelo Cofense/PhishMe) — colaborador -> SOCHAI
     # ------------------------------------------------------------------ #
 
     @staticmethod
@@ -586,7 +586,7 @@ Responde APENAS em JSON válido:
         """
         Triagem heurística inicial de um email reportado por um colaborador.
         Atribui um threat_score (0-100) e um veredicto provisório com base em
-        sinais simples. A confirmação definitiva cabe ao analista SOC (HITL).
+        sinais simples. A confirmação definitiva cabe ao analista SOCHAI (HITL).
         Não substitui a análise dos agentes LLM — apenas prioriza o reporte.
         """
         score = 0.0
@@ -732,12 +732,12 @@ Responde APENAS em JSON válido:
                     "question": "Qual é sempre o primeiro passo ao detetar um incidente de segurança?",
                     "options": [
                         "Ignorar e monitorar",
-                        "Reportar ao SOC imediatamente",
+                        "Reportar ao SOCHAI imediatamente",
                         "Tentar resolver sozinho",
                         "Reiniciar o sistema",
                     ],
                     "correct": 1,
-                    "explanation": "Reportar ao SOC permite uma resposta coordenada e minimiza o impacto.",
+                    "explanation": "Reportar ao SOCHAI permite uma resposta coordenada e minimiza o impacto.",
                 }
             ],
         }

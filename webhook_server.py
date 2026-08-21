@@ -15,7 +15,7 @@ except ValueError as e:
     print(f"❌ Error de configuración: {e}")
     print("💡 Revisa tu archivo .env y asegúrate de tener todas las API keys requeridas")
 
-app = FastAPI(title="SOC Webhook Server - PRODUCCIÓN", version="1.0.0")
+app = FastAPI(title="SOCHAI Webhook Server - PRODUCCIÓN", version="1.0.0")
 
 class SecurityAlert(BaseModel):
     source: str
@@ -70,7 +70,7 @@ async def receive_alert(alert: SecurityAlert):
         return {
             "status": "success",
             "incident_id": incident_id,
-            "message": "Alerta procesada por agentes SOC con APIs reales",
+            "message": "Alerta procesada por agentes SOCHAI con APIs reales",
             "processing_time": "45-90 segundos",
             "apis_used": result.get('tools_used', []),
             "result": result
@@ -187,7 +187,7 @@ async def api_status():
     return status
 
 if __name__ == "__main__":
-    print("🛡️ Iniciando servidor webhook SOC con APIs REALES...")
+    print("🛡️ Iniciando servidor webhook SOCHAI con APIs REALES...")
     print(f"🌐 Puerto: {config.WEBHOOK_PORT}")
     print("🔧 Verificando configuración...")
     

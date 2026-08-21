@@ -18,7 +18,7 @@ def build_soc_workflow():
     supervisor = create_supervisor(
         agents=[alert_analyzer, threat_analyzer, notification_agent],
         model=supervisor_model,
-        prompt="""Eres el supervisor del SOC que coordina EXACTAMENTE 3 pasos secuenciales.
+        prompt="""Eres el supervisor del SOCHAI que coordina EXACTAMENTE 3 pasos secuenciales.
 
 AGENTES DISPONIVEIS:
 1. **alert_analyzer**: Analiza IOCs y determina VERDADERO/FALSO POSITIVO
@@ -59,7 +59,7 @@ def process_security_alert(alert_data: dict, incident_id: str, processing_contex
         processing_context = {}
 
     # Preparar el mensaje inicial/usuario para el supervisor
-    initial_message = f"""ALERTA SOC PARA PROCESAMIENTO SECUENCIAL:
+    initial_message = f"""ALERTA SOCHAI PARA PROCESAMIENTO SECUENCIAL:
 
 ID: {incident_id}
 DATOS: {json.dumps(alert_data, indent=2)}

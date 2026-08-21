@@ -132,7 +132,7 @@ _EXTRA_CATALOG: Dict[str, Dict] = {
 
 
 class SOARExecutor:
-    """Determine and execute automated SOC response actions."""
+    """Determine and execute automated SOCHAI response actions."""
 
     def __init__(self):
         self._log: List[Dict] = []

@@ -2,7 +2,7 @@
 <html lang="pt">
 <head>
 <meta charset="utf-8">
-<title>MESI SOC Platform — Grafo do Projeto</title>
+<title>MESI SOCHAI Platform — Grafo do Projeto</title>
 <script src="https://unpkg.com/vis-network@9.1.9/dist/vis-network.min.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/vis-network@9.1.9/dist/dist/vis-network.min.css">
 <style>
@@ -43,7 +43,7 @@
 
 <header>
   <div>
-    <h1>🛡️ MESI SOC Platform — Grafo de Arquitetura</h1>
+    <h1>🛡️ MESI SOCHAI Platform — Grafo de Arquitetura</h1>
     <p>Clique num nó para ver detalhes · Arraste para explorar · Scroll para zoom</p>
   </div>
 </header>
@@ -97,8 +97,8 @@ const NODE_INFO = {
   },
   'dashboard': {
     title: 'dashboard.py', layer: 'Entrada', color: '#00d4ff',
-    desc: 'Dashboard Streamlit — porta 8501. Interface web com 6 tabs: SOC Operations, Ativos, Playbooks, XAI/HITL, Gamificação, Analytics.',
-    tabs: ['🚨 SOC Operations (pipeline L1→L6)', '🖥️ Ativos (CRUD)', '📋 Playbooks (biblioteca + geração IA)', '🔬 XAI / HITL (fila revisão humana)', '🎮 Gamificação (missões, leaderboard)', '📊 Analytics (métricas globais)'],
+    desc: 'Dashboard Streamlit — porta 8501. Interface web com 6 tabs: SOCHAI Operations, Ativos, Playbooks, XAI/HITL, Gamificação, Analytics.',
+    tabs: ['🚨 SOCHAI Operations (pipeline L1→L6)', '🖥️ Ativos (CRUD)', '📋 Playbooks (biblioteca + geração IA)', '🔬 XAI / HITL (fila revisão humana)', '🎮 Gamificação (missões, leaderboard)', '📊 Analytics (métricas globais)'],
     imports: ['requests → API_BASE (http://localhost:8000)'],
     tags: ['Streamlit', 'HTTP/REST Client', 'UI']
   },

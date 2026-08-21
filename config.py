@@ -13,15 +13,15 @@ class Config:
     GMAIL_CREDENTIALS_FILE = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     GMAIL_TOKEN_FILE = os.getenv("GMAIL_TOKEN")
     
-    # SOC Email Configuration
+    # SOCHAI Email Configuration
     SOC_EMAIL_RECIPIENT = os.getenv("SOC_EMAIL_RECIPIENT")
     SOC_EMAIL_SENDER = os.getenv("SOC_EMAIL_SENDER")
     
-    # APIs opcionales para Threat Intelligence
+    # APIs opcionais para Threat Intelligence
     # ABUSEIPDB_API_KEY = os.getenv("ABUSEIPDB_API_KEY")
     # URLVOID_API_KEY = os.getenv("URLVOID_API_KEY")
     
-    # Configuração do SOC
+    # Configuração do SOCHAI
     WEBHOOK_PORT = 8000
     DASHBOARD_PORT = 8501
 

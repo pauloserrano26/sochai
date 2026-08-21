@@ -1,5 +1,5 @@
 """
-SOC Unified API — FastAPI
+SOCHAI Unified API — FastAPI
 Combines: Alert ingestion, ML detection, Playbook generation, XAI/HITL,
 SOAR execution, Gamification, Assets CRUD, and Incident management.
 """
@@ -27,7 +27,7 @@ from soar_executor import soar_executor
 from xai_hitl import hitl_manager, xai_explainer
 
 app = FastAPI(
-    title="MESI SOC API",
+    title="MESI SOCHAI API",
     description="Security Operations Center — API unificada",
     version="2.0.0",
 )
@@ -680,7 +680,7 @@ def report_phishing(payload: PhishingReportIn, db: Session = Depends(get_db)):
     """
     Um colaborador reporta um email suspeito (botão de reporte estilo Cofense).
     O sistema faz triagem automática, recompensa o colaborador, e — se a ameaça
-    for provável — cria telemetria/incidente no SOC. Fecha o ciclo L5 -> L1.
+    for provável — cria telemetria/incidente no SOCHAI. Fecha o ciclo L5 -> L1.
     """
     user = db.query(User).filter(User.id == payload.reporter_id).first()
     if not user:
@@ -697,7 +697,7 @@ def report_phishing(payload: PhishingReportIn, db: Session = Depends(get_db)):
         triage["verdict"], user.risk_score or 50.0
     )
 
-    # Se a triagem indica ameaça provável, gera um incidente no SOC (L1 -> pipeline)
+    # Se a triagem indica ameaça provável, gera um incidente no SOCHAI (L1 -> pipeline)
     linked_incident_id = None
     if triage["verdict"] == "malicious":
         linked_incident_id = f"INC-{datetime.now().strftime('%Y%m%d%H%M%S')}-{str(uuid.uuid4())[:6]}"
@@ -768,9 +768,9 @@ def report_phishing(payload: PhishingReportIn, db: Session = Depends(get_db)):
         "new_badges": new_badges,
         "incident_created": linked_incident_id,
         "message": (
-            "Obrigado por reportar! Este email gerou um incidente no SOC."
+            "Obrigado por reportar! Este email gerou um incidente no SOCHAI."
             if linked_incident_id else
-            "Obrigado por reportar! O SOC vai analisar o email."
+            "Obrigado por reportar! O SOCHAI vai analisar o email."
         ),
     }
 
@@ -782,7 +782,7 @@ def list_phishing_reports(
     limit: int = 50,
     db: Session = Depends(get_db),
 ):
-    """Lista os reportes de phishing (fila de triagem para o analista SOC)."""
+    """Lista os reportes de phishing (fila de triagem para o analista SOCHAI)."""
     q = db.query(PhishingReport)
     if verdict:
         q = q.filter(PhishingReport.verdict == verdict)
@@ -808,9 +808,9 @@ def review_phishing_report(
     report_id: str, payload: ReportReviewIn, db: Session = Depends(get_db)
 ):
     """
-    O analista SOC confirma o veredicto final de um reporte.
+    O analista SOCHAI confirma o veredicto final de um reporte.
     Ajusta a recompensa do colaborador conforme a confirmação
-    (ex.: apanhar uma simulação real do SOC é especialmente valorizado).
+    (ex.: apanhar uma simulação real do SOCHAI é especialmente valorizado).
     """
     rpt = db.query(PhishingReport).filter(
         PhishingReport.report_id == report_id

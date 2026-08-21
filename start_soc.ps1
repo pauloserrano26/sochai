@@ -1,8 +1,8 @@
-# MESI SOC Platform - Script de Arranque
+# MESI SOCHAI Platform - Script de Arranque
 # Usa o ambiente virtual do projeto (.venv)
 
 Write-Host "=======================================================" -ForegroundColor Cyan
-Write-Host "  MESI SOC Platform - A iniciar..." -ForegroundColor Cyan
+Write-Host "  MESI SOCHAI Platform - A iniciar..." -ForegroundColor Cyan
 Write-Host "=======================================================" -ForegroundColor Cyan
 
 $projectDir = $PSScriptRoot
@@ -16,11 +16,11 @@ if (-not (Test-Path $python)) {
 }
 
 # Janela 1: API FastAPI
-Write-Host "`n[1] A iniciar API SOC em http://localhost:8000 ..." -ForegroundColor Yellow
+Write-Host "`n[1] A iniciar API SOCHAI em http://localhost:8000 ..." -ForegroundColor Yellow
 Start-Process powershell -ArgumentList @(
     "-NoExit",
     "-Command",
-    "cd '$projectDir'; Write-Host 'SOC API -- porta 8000' -ForegroundColor Cyan; & '$python' api_main.py"
+    "cd '$projectDir'; Write-Host 'SOCHAI API -- porta 8000' -ForegroundColor Cyan; & '$python' api_main.py"
 )
 
 Start-Sleep -Seconds 3
@@ -30,7 +30,7 @@ Write-Host "[2] A iniciar Dashboard em http://localhost:8501 ..." -ForegroundCol
 Start-Process powershell -ArgumentList @(
     "-NoExit",
     "-Command",
-    "cd '$projectDir'; Write-Host 'SOC Dashboard -- porta 8501' -ForegroundColor Cyan; & '$streamlit' run dashboard.py --server.port 8501"
+    "cd '$projectDir'; Write-Host 'SOCHAI Dashboard -- porta 8501' -ForegroundColor Cyan; & '$streamlit' run dashboard.py --server.port 8501"
 )
 
 Write-Host "`n=======================================================" -ForegroundColor Green

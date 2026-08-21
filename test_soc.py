@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Test suite for MESI SOC Platform.
+Test suite for MESI SOCHAI Platform.
 Tests all modules that do NOT require live API keys.
 """
 
@@ -23,7 +23,7 @@ def test(name, fn):
 
 
 print("=" * 60)
-print("  MESI SOC Platform -- Test Suite")
+print("  MESI SOCHAI Platform -- Test Suite")
 print("=" * 60)
 
 # ------------------------------------------------------------------ #
@@ -286,7 +286,7 @@ test("Progresso XP para nivel", test_xp_progress)
 # ------------------------------------------------------------------ #
 # 7. Phishing Report (Cofense/PhishMe model) — L5 -> L1
 # ------------------------------------------------------------------ #
-print("\n[7] Phishing Report (colaborador -> SOC)")
+print("\n[7] Phishing Report (colaborador -> SOCHAI)")
 
 def test_triage_malicious():
     t = gamification_engine.triage_report({

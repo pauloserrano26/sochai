@@ -1,5 +1,5 @@
 """
-demo_incidentes.py — Gera 12 incidentes simulados para demonstração do SOC.
+demo_incidentes.py — Gera 12 incidentes simulados para demonstração do SOCHAI.
 
 Cada cenário corresponde a uma das 12 ameaças do guia INCIBE adaptado ao contexto
 de uma PME portuguesa, com IOCs realistas e mapeamento MITRE ATT&CK.
@@ -79,13 +79,13 @@ def limpar_demo():
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Gerador de incidentes demo MESI SOC")
+    parser = argparse.ArgumentParser(description="Gerador de incidentes demo MESI SOCHAI")
     parser.add_argument("--limpar", action="store_true",
                         help="Remove incidentes anteriores desta demo")
     args = parser.parse_args()
 
     print(f"\n{BOLD}{'='*65}{RESET}")
-    print(f"{BOLD}  MESI SOC · Gerador de Incidentes Demo  (12 ameaças INCIBE){RESET}")
+    print(f"{BOLD}  MESI SOCHAI · Gerador de Incidentes Demo  (12 ameaças INCIBE){RESET}")
     print(f"{BOLD}{'='*65}{RESET}\n")
 
     print("  A verificar ligação à API...")

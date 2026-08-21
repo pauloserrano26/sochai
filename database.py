@@ -157,8 +157,8 @@ class TelemetryLog(Base):
 class PhishingReport(Base):
     """
     Reportes de emails suspeitos submetidos por colaboradores (modelo Cofense/PhishMe).
-    Liga a camada L5 (colaborador) de volta à L1 (telemetria do SOC),
-    fechando o ciclo na direção colaborador -> SOC.
+    Liga a camada L5 (colaborador) de volta à L1 (telemetria do SOCHAI),
+    fechando o ciclo na direção colaborador -> SOCHAI.
     """
     __tablename__ = "phishing_reports"
 
@@ -174,9 +174,9 @@ class PhishingReport(Base):
     urls = Column(JSON, default=list)         # links presentes no email
     has_attachment = Column(Boolean, default=False)
 
-    # Classificação atribuída pelo SOC / triagem
+    # Classificação atribuída pelo SOCHAI / triagem
     verdict = Column(String(30), default="pending")  # pending, malicious, simulated, benign
-    is_simulation = Column(Boolean, default=False)    # era uma simulação de phishing do SOC?
+    is_simulation = Column(Boolean, default=False)    # era uma simulação de phishing do SOCHAI?
     threat_score = Column(Float, default=0.0)         # 0-100, atribuído na triagem
     linked_incident_id = Column(String(100))          # incidente gerado, se confirmado
 
@@ -190,7 +190,7 @@ class PhishingReport(Base):
 
 class PhishingCampaign(Base):
     """
-    Campanha de simulação de phishing lançada pelo SOC (modelo Cofense/PhishMe).
+    Campanha de simulação de phishing lançada pelo SOCHAI (modelo Cofense/PhishMe).
     Mede comportamento real: cada alvo pode CLICAR, REPORTAR ou IGNORAR.
     """
     __tablename__ = "phishing_campaigns"
@@ -261,13 +261,13 @@ def seed_default_data():
         if db.query(User).count() == 0:
             demo_users = [
                 User(username="ana.silva", email="ana.silva@empresa.pt", full_name="Ana Silva",
-                     role="soc_analyst", department="SOC", level=3, xp_points=520),
+                     role="soc_analyst", department="SOCHAI", level=3, xp_points=520),
                 User(username="joao.costa", email="joao.costa@empresa.pt", full_name="João Costa",
                      role="employee", department="Financeiro", level=1, xp_points=80),
                 User(username="maria.fernandes", email="maria.fernandes@empresa.pt",
                      full_name="Maria Fernandes", role="manager", department="TI", level=5, xp_points=1200),
-                User(username="admin", email="admin@empresa.pt", full_name="Administrador SOC",
-                     role="admin", department="SOC", level=8, xp_points=6000),
+                User(username="admin", email="admin@empresa.pt", full_name="Administrador SOCHAI",
+                     role="admin", department="SOCHAI", level=8, xp_points=6000),
             ]
             db.add_all(demo_users)
 

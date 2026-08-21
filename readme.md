@@ -13,7 +13,7 @@ Instituto Politécnico de Beja (IPBeja).
 
 ## Objetivo
 
-Disponibilizar um ambiente de SOC funcional, inspirado em soluções como o
+Disponibilizar um ambiente de SOCHAI funcional, inspirado em soluções como o
 Cortex XSIAM, que sirva simultaneamente para:
 
 - **Operação:** ingestão e normalização de eventos, correlação e deteção

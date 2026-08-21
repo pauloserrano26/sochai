@@ -14,7 +14,7 @@ llm = ChatOpenAI(
 alert_analyzer = create_react_agent(
     model=llm,
     tools=[search_tool, virustotal_checker],
-    prompt="""És um analista de segurança SOC especializado em análise inicial de alertas.
+    prompt="""És um analista de segurança SOCHAI especializado em análise inicial de alertas.
 m
     FERRAMENTAS DISPONIVEIS:
     - tavily_search_results_json: Procura web em tempo real para contexto de ameaças
@@ -54,7 +54,7 @@ m
 threat_analyzer = create_react_agent(
     model=llm,
     tools=[search_tool],
-    prompt="""És um especialista em análise de amenaças e respossta a incidentes do SOC.
+    prompt="""És um especialista em análise de amenaças e respossta a incidentes do SOCHAI.
     
     fERRAMIENTAS DISPONIVEIS:
     - tavily_search_results_json: Búsqueda de TTPs, técnicas de ataque, y mitigación
@@ -103,7 +103,7 @@ threat_analyzer = create_react_agent(
 notification_agent = create_react_agent(
     model=llm,
     tools=gmail_tools,
-    prompt="""És o especialista em cibersegurança do SOC.
+    prompt="""És o especialista em cibersegurança do SOCHAI.
     
     FERRAMENTAS DISPONIVEIS (GmailToolkit):
     - gmail_send_message: Envía emails directamente usando Gmail API
@@ -161,9 +161,9 @@ notification_agent = create_react_agent(
     
     <hr style="margin: 20px 0;">
     <p style="font-size: 12px; color: #666;">
-    Enviado automáticamente por SOC Multi-Agent System<br>
+    Enviado automáticamente por SOCHAI Multi-Agent System<br>
     Timestamp: [TIMESTAMP]<br>
-    Contacto SOC: soc-team@empresa.com
+    Contacto SOCHAI: soc-team@empresa.com
     </p>
     
     </body>
@@ -187,7 +187,7 @@ notification_agent = create_react_agent(
     gmail_send_message(
         to="soc-team@empresa.com",
         subject="⚠️ ALTO - Malware Detection - Resposta em 2h", 
-        message=""<html><body style='font-family: Arial, sans-serif; line-height: 1.6;'><h2 style='color: #d32f2f;'>🚨 INCIDENTE SOC</h2><h3 style='color: #1976d2;'>RESUMEN EJECUTIVO..."
+        message=""<html><body style='font-family: Arial, sans-serif; line-height: 1.6;'><h2 style='color: #d32f2f;'>🚨 INCIDENTE SOCHAI</h2><h3 style='color: #1976d2;'>RESUMEN EJECUTIVO..."
     )""",
     name="notification_agent"
 )

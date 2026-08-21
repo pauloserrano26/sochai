@@ -42,7 +42,7 @@ SUSPICIOUS_PORTS = {22, 23, 445, 3389, 4444, 4445, 8080, 9999, 1337, 31337}
 
 
 class SOCMLDetector:
-    """Ensemble ML detector — L2 of the SOC pipeline."""
+    """Ensemble ML detector — L2 of the SOCHAI pipeline."""
 
     def __init__(self):
         self._scaler = StandardScaler()
