@@ -482,15 +482,25 @@ Responde APENAS em JSON válido:
     ) -> float:
         """
         Calculate human risk score (0-100, lower = safer).
+
+        Moves the score from its accumulated history (current_score) toward
+        a target derived from cumulative training and the latest mission's
+        performance, instead of recomputing from a fixed baseline on every
+        update — so past submissions keep influencing the result.
         """
-        base = 50.0
         # Reduce risk through training
         training_reduction = min(missions_completed * 2.5, 30)
         performance_reduction = score_percentage * 0.15
-        # Increase risk for security incidents
-        incident_penalty = 20.0 if has_security_incidents else 0.0
+        target = max(0.0, min(100.0, 50.0 - training_reduction - performance_reduction))
 
-        score = base - training_reduction - performance_reduction + incident_penalty
+        # Blend accumulated history with the new target — recent performance
+        # nudges the score without discarding the user's track record.
+        score = current_score * 0.7 + target * 0.3
+
+        # Security incidents apply immediately, on top of the blended score.
+        if has_security_incidents:
+            score += 20.0
+
         return round(max(0.0, min(100.0, score)), 1)
 
     def check_badges(self, user_data: Dict, mission_result: Dict, elapsed_minutes: float) -> List[str]:
