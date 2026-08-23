@@ -28,6 +28,10 @@ build/
 *.log
 logs/
 
+# Relatórios gerados por simulações (regeneráveis, não são código-fonte)
+simulacao_treino_resultados.json
+simulacao_populacional_resultados.json
+
 # IDE
 .vscode/
 .idea/
