@@ -585,7 +585,7 @@ with tabs[3]:
 with tabs[4]:
     st.header("🎮 Plataforma de Formação & Gamificação (L5)")
 
-    gam_tabs = st.tabs(["🎯 Missões", "🏆 Leaderboard", "👤 Utilizadores", "🤖 Gerar Cenário"])
+    gam_tabs = st.tabs(["🎯 Missões", "🏆 Leaderboard", "👤 Utilizadores", "🤖 Gerar Cenário", "🚩 Reportar Email"])
 
     with gam_tabs[0]:
         diff_f = st.selectbox(
@@ -792,6 +792,109 @@ with tabs[4]:
                             st.write(f"  {mark}{opt}")
                         st.caption(f"  Explicação: {q.get('explanation', '')}")
                 st.info("Cenário adicionado à plataforma — já aparece na tab Missões.")
+
+    with gam_tabs[4]:
+        st.subheader("🚩 Reportar Email Suspeito")
+        st.caption(
+            "Modelo Cofense/PhishMe: o colaborador reporta um email real (não uma simulação) "
+            "com um clique. O sistema faz triagem automática e — se a ameaça for provável — "
+            "gera de imediato um incidente real no SOCHAI. Fecha o ciclo na direção contrária "
+            "à habitual: além do SOCHAI alimentar a formação (L1 → L5), a formação/colaborador "
+            "passa também a alimentar o SOCHAI (L5 → L1)."
+        )
+
+        users_list_report = api("get", "/api/users")
+        report_user_options = users_list_report if isinstance(users_list_report, list) else []
+        if report_user_options:
+            report_sel_user = st.selectbox(
+                "Reportar como:",
+                options=report_user_options,
+                format_func=lambda u: f"{u.get('full_name', u['username'])} (Nível {u.get('level', 1)})",
+                key="report_user_sel",
+            )
+            report_user_id = report_sel_user["id"] if report_sel_user else 1
+        else:
+            report_user_id = st.number_input("ID do utilizador", min_value=1, key="report_uid")
+
+        with st.form("phishing_report_form"):
+            rp_sender = st.text_input(
+                "Remetente *", placeholder="suporte@microsoft-helpdesk.net"
+            )
+            c1, c2 = st.columns(2)
+            rp_subject = c1.text_input(
+                "Assunto", placeholder="Urgente: verifique a sua conta agora"
+            )
+            rp_attachment = c2.checkbox("Contém anexo")
+            rp_body = st.text_area(
+                "Excerto do corpo do email", height=90,
+                placeholder="A sua conta será suspensa. Confirme os seus dados para evitar o bloqueio.",
+            )
+            rp_urls = st.text_area(
+                "URLs presentes no email (uma por linha, opcional)", height=60,
+                placeholder="https://login.office365-secure.test/renew",
+            )
+            report_btn = st.form_submit_button("🚩 Reportar ao SOCHAI", use_container_width=True)
+
+        if report_btn:
+            if not rp_sender.strip():
+                st.error("O remetente é obrigatório.")
+            else:
+                payload = {
+                    "reporter_id": int(report_user_id),
+                    "sender": rp_sender,
+                    "subject": rp_subject,
+                    "body_snippet": rp_body,
+                    "urls": [u.strip() for u in rp_urls.splitlines() if u.strip()],
+                    "has_attachment": rp_attachment,
+                }
+                result = api("post", "/api/phishing/report", json=payload)
+                if "error" in result:
+                    st.error(result["error"])
+                else:
+                    triage = result.get("triage", {})
+                    verdict = triage.get("verdict", "—")
+                    verdict_icon = {"malicious": "🔴", "pending": "🟡", "benign": "🟢"}.get(verdict, "⚪")
+                    st.success(result.get("message", "Reporte submetido."))
+
+                    st.progress(
+                        int(triage.get("threat_score", 0)),
+                        text=f"{verdict_icon} Score de ameaça: {triage.get('threat_score', 0):.0f}/100 — veredicto: {verdict}",
+                    )
+                    if triage.get("signals"):
+                        st.caption("Sinais detetados: " + "; ".join(triage["signals"]))
+
+                    if result.get("incident_created"):
+                        st.success(
+                            f"🔗 **Ciclo L5 → L1 fechado:** incidente **{result['incident_created']}** "
+                            f"criado no SOCHAI — visível na tab **SOCHAI Operations**."
+                        )
+
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("XP ganho", f"+{result.get('xp_awarded', 0)}")
+                    c2.metric("Risk Score", f"{result.get('new_risk_score', 0):.1f}",
+                              delta=f"{-result.get('risk_reduction', 0):.1f}")
+                    c3.metric("XP total", result.get("new_xp_total", 0))
+
+                    if result.get("new_badges"):
+                        for badge in result["new_badges"]:
+                            st.balloons()
+                            st.success(f"🏅 Novo badge: **{badge}**!")
+
+        st.divider()
+        st.subheader("📋 Reportes Recentes — fila de triagem")
+        recent_reports = api("get", "/api/phishing/reports", params={"limit": 10})
+        if isinstance(recent_reports, list) and recent_reports:
+            v_icon = {"malicious": "🔴", "pending": "🟡", "benign": "🟢"}
+            for r in recent_reports:
+                icon = v_icon.get(r.get("verdict"), "⚪")
+                link = f" → `{r['linked_incident_id']}`" if r.get("linked_incident_id") else ""
+                st.write(
+                    f"{icon} **{r.get('sender', '—')}** — {r.get('subject') or '(sem assunto)'} "
+                    f"· reportado por {r.get('reporter', '—')} · score {r.get('threat_score', 0):.0f}"
+                    f"{link}"
+                )
+        else:
+            st.info("Ainda não há reportes de phishing.")
 
 
 # ================================================================== #
