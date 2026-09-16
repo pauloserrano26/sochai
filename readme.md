@@ -1,6 +1,6 @@
 # MESI SOCHAI Dashboard
 
-Plataforma de SOCHAI (Security Operations Center Human Artificail Inteligence) com componente de treino gamificado para analistas júnior, desenvolvida no âmbito do **Mestrado em
+Plataforma de SOCHAI (Security Operations Center Human Artificial Inteligence) com componente de treino gamificado para colaboradores e analistas júnior, desenvolvida no âmbito do **Mestrado em
 Engenharia de Segurança Informática (MESI)** — ano letivo 2025/26,
 Instituto Politécnico de Beja (IPBeja).
 
