@@ -19,7 +19,7 @@ Cortex XSIAM, que sirva simultaneamente para:
 - **Operação:** ingestão e normalização de eventos, correlação e deteção
   mapeada à matriz MITRE ATT&CK, e visualização de alertas em tempo real.
 - **Treino:** ambiente gamificado (missões, desafios CTF, XP, ranks, badges)
-  para desenvolvimento de competências de analistas em formação.
+  para desenvolvimento de competências de colaboradores e analistas em formação.
 
 ---
 
