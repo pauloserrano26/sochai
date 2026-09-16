@@ -6,6 +6,7 @@ token.json
 *_credentials.json
 *_token.json
 service_account*.json
+users_auth.json
 
 # Base de dados local
 *.db

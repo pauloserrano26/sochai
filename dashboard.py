@@ -7,8 +7,13 @@ import math
 from datetime import datetime
 from typing import Dict, List, Optional
 
+import altair as alt
+import pandas as pd
 import requests
 import streamlit as st
+
+import auth
+import portal_colaborador
 
 API_BASE = "http://localhost:8000"
 
@@ -89,11 +94,88 @@ def api_online() -> bool:
 
 
 # ------------------------------------------------------------------ #
-# Sidebar
+# Autenticação e controlo de acesso
 # ------------------------------------------------------------------ #
+
+user = auth.require_login()
 
 with st.sidebar:
     st.markdown("# 🛡️ MESI SOCHAI")
+    st.caption(f"Sessão: **{user['name']}** · `{user['role']}`")
+    if st.button("🚪 Terminar sessão", use_container_width=True):
+        auth.logout()
+        st.rerun()
+
+    if user["role"] == "staff":
+        with st.expander("👥 Gerir acessos ao portal"):
+            existing = auth.list_users()
+            soc_users = api("get", "/api/users")
+            soc_users = soc_users if isinstance(soc_users, list) else []
+            soc_by_id = {u["id"]: u for u in soc_users}
+
+            st.caption("Contas atuais:")
+            for uname, meta in existing.items():
+                linked = soc_by_id.get(meta.get("user_id"))
+                tag = f" → perfil: **{linked['full_name']}**" if linked else ""
+                cols = st.columns([3, 1])
+                cols[0].write(f"`{uname}` — {meta['name']} ({meta['role']}){tag}")
+                if uname != user["username"] and cols[1].button("🗑️", key=f"del_{uname}"):
+                    auth.delete_user(uname)
+                    st.rerun()
+
+            st.divider()
+            st.caption(
+                "Cada conta ligada a um perfil só consegue jogar/reportar como "
+                "esse utilizador — nunca em nome de outro."
+            )
+            pending = [u for u in soc_users if u["id"] not in auth.linked_user_ids()]
+            if pending:
+                st.write(f"**{len(pending)}** utilizador(es) sem acesso ao portal.")
+                if st.button("🚀 Criar acessos para todos", use_container_width=True):
+                    created = auth.provision_bulk(soc_users, role="colaborador")
+                    st.session_state["_new_portal_accounts"] = created
+                    st.rerun()
+            else:
+                st.success("Todos os utilizadores já têm acesso ao portal.")
+
+            new_accs = st.session_state.pop("_new_portal_accounts", None)
+            if new_accs:
+                st.warning("⚠️ Anota estas credenciais agora — não voltam a ser mostradas:")
+                st.dataframe(
+                    [{"Utilizador": a["username"], "Nome": a["name"], "Palavra-passe": a["password"]} for a in new_accs],
+                    use_container_width=True, hide_index=True,
+                )
+
+            st.divider()
+            with st.form("new_access_form"):
+                st.caption("Criar acesso manual")
+                link_options = ["— nenhum (conta avulsa) —"] + [
+                    f"{u['full_name']} ({u['username']})" for u in soc_users if u["id"] not in auth.linked_user_ids()
+                ]
+                na_link = st.selectbox("Associar a utilizador", link_options)
+                na_user = st.text_input("Utilizador (login) *")
+                na_name = st.text_input("Nome")
+                na_role = st.selectbox("Nível de acesso", ["colaborador", "staff"])
+                na_pw = st.text_input("Palavra-passe *", type="password")
+                if st.form_submit_button("Criar acesso", use_container_width=True):
+                    try:
+                        na_uid = None
+                        if na_link != link_options[0]:
+                            na_uid = [u for u in soc_users if u["id"] not in auth.linked_user_ids()][
+                                link_options.index(na_link) - 1
+                            ]["id"]
+                        auth.add_user(na_user, na_pw, na_role, na_name, user_id=na_uid)
+                        st.success(f"Acesso '{na_user}' criado.")
+                    except ValueError as e:
+                        st.error(str(e))
+    st.divider()
+
+# Colaboradores só têm acesso ao portal restrito.
+if user["role"] != "staff":
+    portal_colaborador.render(user)
+    st.stop()
+
+with st.sidebar:
     st.markdown("**Security Operations Center**")
     st.divider()
 
@@ -130,6 +212,7 @@ tabs = st.tabs([
     "🎮 Gamificação",
     "📊 Analytics",
     "🎬 Cenários",
+    "📈 Resultados",
 ])
 
 
@@ -143,6 +226,14 @@ with tabs[1]:
 
     with col_form:
         st.subheader("Submeter Alerta")
+
+        asset_options = api("get", "/api/assets", params={})
+        asset_list = asset_options if isinstance(asset_options, list) else []
+        asset_choices = ["🔎 Auto (detetar por IP)"] + [
+            f"{a['name']} — {a.get('ip_address') or 's/ IP'} [{a.get('criticality') or '—'}]"
+            for a in asset_list
+        ]
+
         with st.form("alert_form"):
             alert_type = st.selectbox(
                 "Tipo de Ameaça",
@@ -155,6 +246,7 @@ with tabs[1]:
             url_ioc = st.text_input("URL / Domínio (opcional)")
             hash_ioc = st.text_input("Hash de Ficheiro (opcional)")
             port_ioc = st.number_input("Porta (opcional)", min_value=0, max_value=65535, value=0)
+            asset_choice = st.selectbox("Ativo Afetado", asset_choices)
 
             submitted = st.form_submit_button("🚀 Submeter Alerta", use_container_width=True)
 
@@ -175,6 +267,9 @@ with tabs[1]:
                     payload["hash"] = hash_ioc
                 if port_ioc:
                     payload["port"] = port_ioc
+                if asset_choice != asset_choices[0]:
+                    sel_idx = asset_choices.index(asset_choice) - 1
+                    payload["asset_id"] = asset_list[sel_idx]["id"]
 
                 with st.spinner("A processar alerta no pipeline SOCHAI..."):
                     result = api("post", "/api/alerts", json=payload)
@@ -191,6 +286,9 @@ with tabs[1]:
                     col_r1, col_r2 = st.columns(2)
                     col_r1.write(f"**Decisão ML:** {result.get('xai_summary', '—')}")
                     col_r2.write(f"**Playbook:** {result.get('playbook_id', '—')}")
+                    st.write(
+                        f"**Ativo Afetado:** {result.get('asset_name') or '— (nenhum ativo correspondente)'}"
+                    )
                     st.write(f"**Ação Recomendada:** {result.get('recommended_action', '—')}")
                     st.write(f"**Ações SOAR Executadas:** {result.get('soar_actions_executed', 0)}")
 
@@ -226,6 +324,11 @@ with tabs[1]:
         )
 
         if isinstance(incidents, list) and incidents:
+            _inc_assets = api("get", "/api/assets", params={})
+            inc_asset_list = _inc_assets if isinstance(_inc_assets, list) else []
+            reassoc_choices = ["— nenhum —"] + [
+                f"{a['name']} — {a.get('ip_address') or 's/ IP'}" for a in inc_asset_list
+            ]
             for inc in incidents:
                 sev = inc.get("severity", "MEDIA")
                 with st.expander(
@@ -242,6 +345,38 @@ with tabs[1]:
                     )
                     c3.metric("Playbook", inc.get("playbook_id") or "—")
                     st.caption(f"Criado: {(inc.get('created_at') or '')[:16]}")
+
+                    if inc.get("asset_name"):
+                        st.write(
+                            f"**🖥️ Ativo Afetado:** {inc['asset_name']} "
+                            f"({inc.get('asset_criticality') or '—'})"
+                        )
+                    else:
+                        st.write("**🖥️ Ativo Afetado:** — nenhum")
+
+                    cur_idx = 0
+                    for i, a in enumerate(inc_asset_list):
+                        if a["id"] == inc.get("asset_id"):
+                            cur_idx = i + 1
+                            break
+                    new_assoc = st.selectbox(
+                        "Associar a ativo",
+                        reassoc_choices,
+                        index=cur_idx,
+                        key=f"assoc_{inc['incident_id']}",
+                    )
+                    if st.button("Guardar ativo", key=f"saveassoc_{inc['incident_id']}"):
+                        params = {}
+                        if new_assoc != reassoc_choices[0]:
+                            params["asset_id"] = inc_asset_list[
+                                reassoc_choices.index(new_assoc) - 1
+                            ]["id"]
+                        api(
+                            "patch",
+                            f"/api/incidents/{inc['incident_id']}/asset",
+                            params=params,
+                        )
+                        st.rerun()
 
                     new_status = st.selectbox(
                         "Alterar Estado",
@@ -323,6 +458,20 @@ with tabs[0]:
                         st.caption(a["description"])
                     if a.get("tags"):
                         st.write(" ".join(f"`{t}`" for t in a["tags"]))
+
+                    st.divider()
+                    asset_incs = api("get", f"/api/assets/{a['id']}/incidents")
+                    if isinstance(asset_incs, list) and asset_incs:
+                        st.write(f"**🚨 Alertas associados ({len(asset_incs)}):**")
+                        for ic in asset_incs:
+                            st.markdown(
+                                f"- {sev_icon(ic.get('severity'))} "
+                                f"[{ic['incident_id']}] {ic.get('title', '—')} "
+                                f"— {status_label(ic.get('status', ''))}"
+                            )
+                    else:
+                        st.caption("Sem alertas associados a este ativo.")
+
                     if st.button("🗑️ Remover Ativo", key=f"del_{a['id']}"):
                         api("delete", f"/api/assets/{a['id']}")
                         st.rerun()
@@ -708,6 +857,13 @@ with tabs[4]:
     with gam_tabs[2]:
         st.subheader("👤 Utilizadores")
 
+        user_asset_options = api("get", "/api/assets", params={})
+        user_asset_list = user_asset_options if isinstance(user_asset_options, list) else []
+        user_asset_choices = ["— Nenhum —"] + [
+            f"{a['name']} — {a.get('ip_address') or 's/ IP'} [{a.get('criticality') or '—'}]"
+            for a in user_asset_list
+        ]
+
         users_all = api("get", "/api/users")
         if isinstance(users_all, list) and users_all:
             for u in users_all:
@@ -722,13 +878,65 @@ with tabs[4]:
                     c1.metric("XP", u.get("xp_points", 0))
                     c2.metric("Missões", f"{u.get('missions_completed', 0)}/{u.get('total_missions', 0)}")
                     c3.metric("Departamento", u.get("department") or "—")
+                    st.write(f"**Ativo Associado:** {u.get('asset_name') or '—'}")
                     st.progress(int(risk), text=f"Human Risk Score: {risk:.1f}/100")
                     badges = u.get("badges", [])
                     if badges:
                         st.write("Badges: " + " ".join(f"`{b}`" for b in badges))
 
+                    edit_key = f"editing_user_{u['id']}"
+                    if st.button("✏️ Editar Utilizador", key=f"edit_btn_{u['id']}"):
+                        st.session_state[edit_key] = not st.session_state.get(edit_key, False)
+
+                    if st.session_state.get(edit_key):
+                        current_asset_idx = 0
+                        if u.get("asset_id"):
+                            for i, a in enumerate(user_asset_list):
+                                if a["id"] == u["asset_id"]:
+                                    current_asset_idx = i + 1
+                                    break
+
+                        role_options = ["employee", "soc_analyst", "manager", "admin"]
+                        with st.form(f"edit_user_form_{u['id']}"):
+                            eu_username = st.text_input("Username *", value=u.get("username", ""))
+                            ce1, ce2 = st.columns(2)
+                            eu_name = ce1.text_input("Nome Completo", value=u.get("full_name") or "")
+                            eu_email = ce2.text_input("Email", value=u.get("email") or "")
+                            ce3, ce4 = st.columns(2)
+                            eu_role = ce3.selectbox(
+                                "Role", role_options,
+                                index=role_options.index(u.get("role")) if u.get("role") in role_options else 0,
+                            )
+                            eu_dept = ce4.text_input("Departamento", value=u.get("department") or "")
+                            eu_asset_choice = st.selectbox(
+                                "Ativo Associado", user_asset_choices, index=current_asset_idx,
+                            )
+                            save_edit_btn = st.form_submit_button("💾 Guardar Alterações", use_container_width=True)
+
+                        if save_edit_btn:
+                            if not eu_username.strip():
+                                st.error("O username é obrigatório.")
+                            else:
+                                edit_payload = {
+                                    "username": eu_username, "full_name": eu_name,
+                                    "email": eu_email, "role": eu_role, "department": eu_dept,
+                                    "asset_id": None,
+                                }
+                                if eu_asset_choice != user_asset_choices[0]:
+                                    sel_idx = user_asset_choices.index(eu_asset_choice) - 1
+                                    edit_payload["asset_id"] = user_asset_list[sel_idx]["id"]
+
+                                res = api("put", f"/api/users/{u['id']}", json=edit_payload)
+                                if "error" in res:
+                                    st.error(res.get("error", "Erro ao atualizar utilizador"))
+                                else:
+                                    st.session_state[edit_key] = False
+                                    st.success(f"✅ Utilizador '{eu_username}' atualizado")
+                                    st.rerun()
+
         st.divider()
         st.subheader("➕ Criar Utilizador")
+
         with st.form("user_form"):
             u_username = st.text_input("Username *")
             c1, c2 = st.columns(2)
@@ -737,16 +945,22 @@ with tabs[4]:
             c3, c4 = st.columns(2)
             u_role = c3.selectbox("Role", ["employee", "soc_analyst", "manager", "admin"])
             u_dept = c4.text_input("Departamento")
+            u_asset_choice = st.selectbox("Ativo Associado", user_asset_choices)
             create_btn = st.form_submit_button("Criar Utilizador", use_container_width=True)
 
         if create_btn:
             if not u_username.strip():
                 st.error("O username é obrigatório.")
             else:
-                res = api("post", "/api/users", json={
+                payload = {
                     "username": u_username, "full_name": u_name,
                     "email": u_email, "role": u_role, "department": u_dept,
-                })
+                }
+                if u_asset_choice != user_asset_choices[0]:
+                    sel_idx = user_asset_choices.index(u_asset_choice) - 1
+                    payload["asset_id"] = user_asset_list[sel_idx]["id"]
+
+                res = api("post", "/api/users", json=payload)
                 if "error" in res:
                     st.error(res.get("error", "Erro ao criar utilizador"))
                 else:
@@ -1359,8 +1573,16 @@ with tabs[6]:
                 "ML Score": inc["ml_score"],
                 "HITL": "Sim" if inc["hitl_required"] else "Não",
                 "Playbook": inc["playbook_id"],
+                "Ativo Afetado": inc.get("asset_name") or "— (sem correspondência)",
+                "Criticidade": inc.get("asset_criticality") or "—",
             } for inc in result["incidents"]]
             st.dataframe(rows, use_container_width=True, hide_index=True)
+            n_com_ativo = sum(1 for inc in result["incidents"] if inc.get("asset_id"))
+            st.caption(
+                f"🖥️ {n_com_ativo}/{len(result['incidents'])} incidente(s) associados automaticamente "
+                "a um ativo real (por IP de origem ou IP mencionado na descrição do alerta) — "
+                "ver tab **Ativos** para o inventário completo."
+            )
 
             st.subheader("📋 Playbooks Associados")
             for pb in result["playbooks"]:
@@ -1395,5 +1617,305 @@ with tabs[6]:
                 )
     else:
         st.error("Não foi possível carregar o catálogo de cenários.")
+
+
+# ================================================================== #
+# TAB 8 — Resultados & Evolução da Gamificação (L5)
+# ================================================================== #
+with tabs[7]:
+    import json as _json
+    import subprocess
+    import sys
+    from pathlib import Path as _Path
+
+    st.header("📈 Resultados & Evolução — Gamificação (L5)")
+    st.caption(
+        "Evolução do Human Risk Score (HRS) e resultados finais de duas simulações "
+        "reprodutíveis, ambas sobre o motor real (GamificationEngine): **percurso "
+        "individual** (`simulacao_treino.py`) e **amostra populacional** n=15, "
+        "seed=42 (`simulacao_populacional.py`)."
+    )
+
+    _BASE = _Path(__file__).resolve().parent
+    _F_TREINO = _BASE / "simulacao_treino_resultados.json"
+    _F_POP = _BASE / "simulacao_populacional_resultados.json"
+
+    def _load_json(path):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return _json.load(fh)
+        except FileNotFoundError:
+            return None
+        except Exception as exc:  # noqa: BLE001
+            return {"__error__": str(exc)}
+
+    _cr, _cinfo = st.columns([1, 2])
+    with _cr:
+        if st.button("▶️ Correr / atualizar simulações", use_container_width=True):
+            _out, _all_ok = [], True
+            with st.spinner("A correr as simulações sobre o GamificationEngine..."):
+                for _script in ("simulacao_treino.py", "simulacao_populacional.py"):
+                    _proc = subprocess.run(
+                        [sys.executable, str(_BASE / _script)],
+                        cwd=str(_BASE), capture_output=True, text=True,
+                    )
+                    _all_ok = _all_ok and _proc.returncode == 0
+                    _out.append(f"$ python {_script}\n{_proc.stdout}{_proc.stderr}")
+            st.session_state["_sim_logs"] = "\n\n".join(_out)
+            if _all_ok:
+                st.success("Simulações concluídas — resultados atualizados.")
+            else:
+                st.error("Falha ao correr uma das simulações — ver logs abaixo.")
+
+    _treino = _load_json(_F_TREINO)
+    _pop = _load_json(_F_POP)
+
+    with _cinfo:
+        _stamps = []
+        if isinstance(_treino, dict) and _treino.get("gerado_em"):
+            _stamps.append(f"individual {_treino['gerado_em'][:19]}")
+        if isinstance(_pop, dict) and _pop.get("gerado_em"):
+            _stamps.append(f"populacional {_pop['gerado_em'][:19]}")
+        if _stamps:
+            st.caption("🕒 Resultados gerados em: " + " · ".join(_stamps))
+
+    if st.session_state.get("_sim_logs"):
+        with st.expander("🖥️ Logs da última execução das simulações"):
+            st.code(st.session_state["_sim_logs"])
+
+    for _d in (_treino, _pop):
+        if isinstance(_d, dict) and _d.get("__error__"):
+            st.error(f"Erro a ler resultados: {_d['__error__']}")
+
+    _has_treino = isinstance(_treino, dict) and "jornada" in _treino
+    _has_pop = isinstance(_pop, dict) and "populacao" in _pop
+
+    if not _has_treino and not _has_pop:
+        st.warning(
+            "Ainda não há ficheiros de resultados. Clique em "
+            "**▶️ Correr / atualizar simulações** ou execute na linha de comandos:\n\n"
+            "```\npython simulacao_treino.py\npython simulacao_populacional.py\n```"
+        )
+        st.stop()
+
+    _RISK_SCALE = alt.Scale(domain=[0, 70])
+    _GRP = {"alto": "Competência alta", "medio": "Competência média", "baixo": "Competência baixa"}
+    _GRP_ORDER = ["Competência alta", "Competência média", "Competência baixa"]
+
+    # ---------------------------------------------------------------- #
+    # 1 · Evolução do HRS — percurso individual
+    # ---------------------------------------------------------------- #
+    if _has_treino:
+        st.divider()
+        st.subheader("1 · Evolução do Human Risk Score — percurso individual")
+        st.caption(
+            "Um colaborador percorre 5 missões base, 2 simulações de phishing e "
+            "sofre 1 incidente de segurança real. Compara o algoritmo **novo** "
+            "(history-aware) com o **antigo** (recalculava sempre a partir de base fixa)."
+        )
+
+        _jr = _treino["jornada"]
+        _rows = []
+        for _i, _s in enumerate(_jr, start=1):
+            _rows.append({"n": _i, "Algoritmo": "Novo (history-aware)",
+                          "HRS": _s["risk_score_novo"]})
+            if _s.get("risk_score_antigo") is not None:
+                _rows.append({"n": _i, "Algoritmo": "Antigo (base fixa)",
+                              "HRS": _s["risk_score_antigo"]})
+        _dfj = pd.DataFrame(_rows)
+
+        _rule = alt.Chart(pd.DataFrame({"y": [20, 50]})).mark_rule(
+            strokeDash=[4, 4], color="#8899aa"
+        ).encode(y="y:Q")
+        _line = alt.Chart(_dfj).mark_line(point=True).encode(
+            x=alt.X("n:O", title="Passo da jornada (ver tabela abaixo)"),
+            y=alt.Y("HRS:Q", scale=_RISK_SCALE, title="Human Risk Score"),
+            color=alt.Color("Algoritmo:N", legend=alt.Legend(orient="top")),
+            tooltip=["n", "Algoritmo", "HRS"],
+        )
+        st.altair_chart(_rule + _line, use_container_width=True)
+
+        st.dataframe([{
+            "Passo": _i,
+            "Etapa": _s["step"],
+            "Tipo": _s["type"],
+            "Score": f"{_s['score_percentage']:.0f}%" if _s.get("score_percentage") is not None else "—",
+            "XP": _s["xp_earned"],
+            "HRS (novo)": _s["risk_score_novo"],
+            "Badges": ", ".join(_s.get("badges") or []) or "—",
+        } for _i, _s in enumerate(_jr, start=1)], use_container_width=True, hide_index=True)
+
+        _rf = _treino.get("resultado_final_novo", {})
+        _tst = _treino.get("testes", {})
+        _hrs_f = _rf.get("risk_score", 0)
+        _k = st.columns(4)
+        _k[0].markdown(metric_card("HRS inicial", "50.0"), unsafe_allow_html=True)
+        _k[1].markdown(metric_card(
+            f"HRS final ({_rf.get('risk_band', '—')})", f"{_hrs_f:.1f}",
+            "red" if _hrs_f >= 50 else "yellow" if _hrs_f >= 20 else "green",
+        ), unsafe_allow_html=True)
+        _k[2].markdown(metric_card(
+            "Nível · XP", f"{_rf.get('nivel', '—')} · {_rf.get('xp_points', '—')}"
+        ), unsafe_allow_html=True)
+        _passed = _tst.get("passaram", 0)
+        _total_t = _passed + _tst.get("falharam", 0)
+        _k[3].markdown(metric_card(
+            "Testes update_risk_score", f"{_passed}/{_total_t}",
+            "green" if _total_t and _passed == _total_t else "red",
+        ), unsafe_allow_html=True)
+        st.caption(
+            "⚠️ O HRS final sobe no último passo porque a jornada termina com um "
+            "**incidente de segurança real** imputado ao colaborador (+20), que anula "
+            "parte do ganho da formação — comportamento pretendido."
+        )
+
+    # ---------------------------------------------------------------- #
+    # 2 · Antes / depois — amostra populacional
+    # ---------------------------------------------------------------- #
+    if _has_pop:
+        _p = _pop["populacao"]
+
+        st.divider()
+        st.subheader("2 · Antes / depois — HRS médio por estágio (n=15, seed=42)")
+        st.caption(
+            "15 colaboradores sintéticos em 3 níveis de competência (prob. de acerto "
+            "90% / 60% / 30%). HRS médio no início (baseline=50), após as 5 missões "
+            "e após uma campanha de phishing simulado."
+        )
+        _stg = _p["avg_risk_by_stage"]
+        _SLAB = {"baseline": "Baseline", "pos_treino": "Pós-treino", "pos_phishing": "Pós-phishing"}
+        _SORDER = ["Baseline", "Pós-treino", "Pós-phishing"]
+        _dfs = pd.DataFrame([
+            {"Estágio": _SLAB[_k], "Grupo": _GRP[_g], "HRS": _v}
+            for _g, _dd in _stg.items() for _k, _v in _dd.items()
+        ])
+        st.altair_chart(alt.Chart(_dfs).mark_bar().encode(
+            x=alt.X("Estágio:N", sort=_SORDER, title=None),
+            xOffset=alt.XOffset("Grupo:N", sort=_GRP_ORDER),
+            y=alt.Y("HRS:Q", scale=alt.Scale(domain=[0, 60]), title="HRS médio"),
+            color=alt.Color("Grupo:N", sort=_GRP_ORDER, legend=alt.Legend(orient="top")),
+            tooltip=["Grupo", "Estágio", "HRS"],
+        ), use_container_width=True)
+
+        _dcols = st.columns(3)
+        for _idx, (_g, _lab) in enumerate(_GRP.items()):
+            _b, _f = _stg[_g]["baseline"], _stg[_g]["pos_phishing"]
+            _dcols[_idx].metric(
+                _lab, f"HRS {_f:.1f}", delta=f"{_f - _b:+.1f} vs baseline",
+                delta_color="inverse",
+            )
+
+        # 3 · Score por cenário
+        st.divider()
+        st.subheader("3 · Desempenho por cenário e nível de competência")
+        _dfsc = pd.DataFrame([
+            {"Cenário": _sid, "Grupo": _GRP[_g], "Score médio (%)": _val}
+            for _g, _dd in _p["avg_score_by_scenario"].items() for _sid, _val in _dd.items()
+        ])
+        st.altair_chart(alt.Chart(_dfsc).mark_bar().encode(
+            x=alt.X("Cenário:N", title=None),
+            xOffset=alt.XOffset("Grupo:N", sort=_GRP_ORDER),
+            y=alt.Y("Score médio (%):Q", scale=alt.Scale(domain=[0, 100])),
+            color=alt.Color("Grupo:N", sort=_GRP_ORDER, legend=alt.Legend(orient="top")),
+            tooltip=["Cenário", "Grupo", "Score médio (%)"],
+        ), use_container_width=True)
+
+        # 4 · Campanha de phishing
+        st.divider()
+        st.subheader("4 · Campanha de phishing simulado — comportamento e resiliência")
+        _cs = _p["campaign_stats"]
+        _OUT = {"reported": "Reportou", "ignored": "Ignorou", "clicked": "Clicou na isca"}
+        _dfc = pd.DataFrame([
+            {"Grupo": _GRP[_g], "Desfecho": _OUT[_o], "Colaboradores": _cs[_g][_o]}
+            for _g in _cs for _o in ("reported", "ignored", "clicked")
+        ])
+        _cc1, _cc2 = st.columns([1.4, 1])
+        with _cc1:
+            st.altair_chart(alt.Chart(_dfc).mark_bar().encode(
+                x=alt.X("Grupo:N", sort=_GRP_ORDER, title=None),
+                y=alt.Y("Colaboradores:Q"),
+                color=alt.Color("Desfecho:N", scale=alt.Scale(
+                    domain=["Reportou", "Ignorou", "Clicou na isca"],
+                    range=["#2fd07a", "#f5c451", "#ff5d6c"],
+                ), legend=alt.Legend(orient="top")),
+                tooltip=["Grupo", "Desfecho", "Colaboradores"],
+            ), use_container_width=True)
+        with _cc2:
+            st.altair_chart(alt.Chart(pd.DataFrame([
+                {"Grupo": _GRP[_g], "Resiliência (%)": _cs[_g]["resilience_pct"]} for _g in _cs
+            ])).mark_bar().encode(
+                x=alt.X("Resiliência (%):Q", scale=alt.Scale(domain=[0, 100])),
+                y=alt.Y("Grupo:N", sort=_GRP_ORDER, title=None),
+                color=alt.Color("Grupo:N", sort=_GRP_ORDER, legend=None),
+                tooltip=["Grupo", "Resiliência (%)"],
+            ), use_container_width=True)
+
+        _ov = _p.get("campaign_overview", {})
+        _res = _ov.get("resilience_pct", 0)
+        _o = st.columns(4)
+        _o[0].markdown(metric_card("Taxa de cliques", f"{_ov.get('click_rate_pct', 0):.0f}%", "red"), unsafe_allow_html=True)
+        _o[1].markdown(metric_card("Taxa de reporte", f"{_ov.get('report_rate_pct', 0):.0f}%", "green"), unsafe_allow_html=True)
+        _o[2].markdown(metric_card(
+            "Resilience rate global", f"{_res:.0f}%",
+            "green" if _res >= 70 else "yellow" if _res >= 40 else "red",
+        ), unsafe_allow_html=True)
+        _o[3].markdown(metric_card("Tempo médio até ação", f"{_ov.get('avg_time_seconds', 0):.0f}s"), unsafe_allow_html=True)
+
+        # 5 · Percurso individual detalhado
+        _ind = _pop.get("individual")
+        if _ind:
+            st.divider()
+            st.subheader("5 · Percurso individual detalhado — mecânica de pontuação")
+            st.caption(
+                f"Utilizador '{_ind['utilizador']}' com respostas propositadamente "
+                "variadas (perfeitas, parciais e totalmente erradas) para expor a "
+                "relação score → XP → aprovação."
+            )
+            st.dataframe([{
+                "Cenário": _r["cenario"],
+                "Dificuldade": _r["dificuldade"],
+                "Acertos": _r["acertos"],
+                "Score": f"{_r['score_pct']:.1f}%",
+                "XP": _r["xp_ganho"],
+                "Aprovado": "✅" if _r["aprovado"] else "❌",
+            } for _r in _ind["rows"]], use_container_width=True, hide_index=True)
+            _ic = st.columns(4)
+            _ic[0].markdown(metric_card("XP total · Nível", f"{_ind['xp_total']} · {_ind['nivel']}"), unsafe_allow_html=True)
+            _ic[1].markdown(metric_card("Missões aprovadas", f"{_ind['missions_aprovadas']}/{_ind['missions_total']}"), unsafe_allow_html=True)
+            _ic[2].markdown(metric_card("HRS inicial → final", f"{_ind['risk_inicial']:.0f} → {_ind['risk_final']:.1f}"), unsafe_allow_html=True)
+            _ic[3].markdown(metric_card(
+                "Variação do HRS", f"{_ind['risk_delta_pct']:+.1f}%",
+                "green" if _ind["risk_delta_pct"] < 0 else "red",
+            ), unsafe_allow_html=True)
+
+    # ---------------------------------------------------------------- #
+    # 6 · Contribuição metodológica — correção de update_risk_score()
+    # ---------------------------------------------------------------- #
+    st.divider()
+    st.subheader("6 · Contribuição metodológica — correção do cálculo do HRS")
+    st.markdown(
+        "O algoritmo original de `update_risk_score()` **recalculava o risco a partir "
+        "de uma base fixa (50)** a cada submissão, ignorando o `current_score` "
+        "acumulado. Dois colaboradores com históricos opostos, ao obterem o mesmo "
+        "resultado numa missão, ficavam com **exatamente o mesmo HRS** — o histórico "
+        "era apagado.\n\n"
+        "A versão corrigida mistura o histórico com o novo alvo "
+        "(`HRS = current·0.7 + alvo·0.3`), preservando a trajetória de cada pessoa."
+    )
+    st.table([
+        {"Colaborador": "A — histórico de risco alto", "HRS atual": 80,
+         "Resultado da missão": "90%", "HRS (algoritmo antigo)": 24.0, "HRS (algoritmo novo)": 63.2},
+        {"Colaborador": "B — histórico de risco baixo", "HRS atual": 15,
+         "Resultado da missão": "90%", "HRS (algoritmo antigo)": 24.0, "HRS (algoritmo novo)": 17.7},
+    ])
+    if isinstance(_treino, dict) and _treino.get("testes"):
+        _t = _treino["testes"]
+        if _t.get("falharam", 1) == 0:
+            st.success(
+                f"✅ {_t['passaram']}/{_t['passaram']} testes de `simulacao_treino.py` "
+                "passam — bug confirmado e corrigido."
+            )
+        else:
+            st.error(f"{_t['falharam']} teste(s) a falhar.")
 
 

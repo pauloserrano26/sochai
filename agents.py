@@ -40,7 +40,7 @@ m
     [Informação de TavilySearch sobre ameaças similares]
     
     ⚖️ CONCLUSÃO FINAL: [VERDADEIRO POSITIVO / FALSO POSITIVO]
-    📋 JUSTIFICAÇÃO: [Evidncia específica que soporta la decisión]
+    📋 JUSTIFICAÇÃO: [Evidencia específica que soporta la decisión]
     
     IMPORTANTE:
     - USA TODAS as ferramentas disponiveis para análises completo
@@ -50,7 +50,7 @@ m
     name="alert_analyzer"
 )
 
-# Agente 2: Analisis de Amenazas y Mitigaciones
+# Agente 2: Análsie de Amenaças e Mitigações
 threat_analyzer = create_react_agent(
     model=llm,
     tools=[search_tool],
@@ -60,7 +60,7 @@ threat_analyzer = create_react_agent(
     - tavily_search_results_json: Búsqueda de TTPs, técnicas de ataque, y mitigación
     
     PROCESSO DE AVALIAÇÃO OBRIGATÓRIO:
-    1. Investigar el tipo específico de amenaza con tavily_search_results_json
+    1. Investigar o tipo específico de ameaça com tavily_search_results_json
     2. Procurar TTPs (Tactics, Techniques, Procedures) atualizados relacionados
     3. Avaliar com severidade: CRÍTICA, ALTA, MÉDIA, BAIXA com justificação técnica
     4. Investigar medidas de mitigação específicas e atualizadas
@@ -71,15 +71,15 @@ threat_analyzer = create_react_agent(
     🎯 VALIAÇÃO DA AEMAEÇA COMPLETADA
     
     🔍 TIPO DE AMENAZA:
-    [Clasificação específica da amenaça]
+    [Clasificação específica da ameaça]
     
     ⚔️ TTPs IDENTIFICADOS:
     [Tactics, Techniques, Procedures encontrados]
     
-    📊 NIVEL DE SEVERIDAD: [CRÍTICA/ALTA/MEDIA/BAJA]
-    📋 JUSTIFICACIÓN: [Evidência técnica que soporta el nivel]
+    📊 NIVEL DE SEVERIDADE: [CRÍTICA/ALTA/MEDIA/BAJA]
+    📋 JUSTIFICAÇÃO: [Evidência técnica que soporta el nivel]
     
-    🛡️ INFORMACIÓN DE CAMPAÑAS:
+    🛡️ INFORMAÇÃO DE CAMPANHAS:
     [Contexto de threat intelligence sobre actores/campañas]
     
     🔧 MEDIDAS DE MITIGAÇÃO IMEDIATAS:
@@ -113,9 +113,9 @@ notification_agent = create_react_agent(
     
     HERRAMIENTA PRINCIPAL A USAR: gmail_send_message
     
-    PROCESSO DE NOTIFICACÇÃO OBRIGATÓRIO:
+    PROCESSO DE NOTIFICAÇÃO OBRIGATÓRIO:
     1. Analizar toda a informação prévia para determinar urgência da mensagem
-    2. Cria assunto de email claro, específico e que refleje a prioridade correta
+    2. Cria assunto de email claro, específico e que reflita a prioridade correta
     3. Redatar corpo da mensagem profissional e completo incluindo:
        - Resumen executivo do incidente
        - Detalhes técnicos da análise realizada
@@ -125,14 +125,14 @@ notification_agent = create_react_agent(
        - Informação de contacto para seguimento
     4. EJECUTAR gmail_send_message con estes parâmetros exatos:
        - to: "serranotoc@gmail.com" (o email especificado en contexto)
-       - subject: "[Assunto según severidad]"
+       - subject: "[Assunto de acordo com a severidade]"
        - message: "[Corpo completo do email]"
     
     FORMATO DE ASSUNTO SEGUNDO SEVERIDADE:
     - Crítico: "🚨 CRÍTICO - [Tipo de ameaça] - Ação inmediata requerida"
     - Alto: "⚠️ ALTO - [Tipo de ameaça] - Resposta em 2h"
     - Médio: "📋 MEDIO - [Tipo de ameaça] - Resposta em 24h"  
-    - Baixo: "ℹ️ BAJO - [Tipo de ameaça] - Para revisão"
+    - Baixo: "ℹ️ BAIXO - [Tipo de ameaça] - Para revisão"
     - Falso Positivo: "✅ INFO - Falso Positivo - [ID] - Para conhecimentop"
     
     FORMATO DO EMAIL (IMPORTANTE - USA HTML):
@@ -145,9 +145,9 @@ notification_agent = create_react_agent(
     <h2 style="color: #d32f2f;">🚨 RESUMO EXECUTIVO</h2>
     <p><strong>ID Incidente:</strong> [ID]</p>
     <p><strong>Severidade:</strong> [NIVEL]</p>
-    <p><strong>Estado:</strong> [VERDADERO POSITIVO/FALSO POSITIVO]</p>
+    <p><strong>Estado:</strong> [VERDADEIRO POSITIVO/FALSO POSITIVO]</p>
     
-    <h3 style="color: #1976d2;">📊 DETALLES TÉCNICOS</h3>
+    <h3 style="color: #1976d2;">📊 DETALHES TÉCNICOS</h3>
     <p>[Informação da análise com saltos de linha com parágrafos separados]</p>
     
     <h3 style="color: #388e3c;">🔧 AÇÕES RECOMENDADAS</h3>
@@ -157,7 +157,7 @@ notification_agent = create_react_agent(
     </ul>
     
     <h3 style="color: #f57c00;">📅 TIMELINE</h3>
-    <p>Implementar em: [TIEMPO]</p>
+    <p>Implementar em: [TEMPO]</p>
     
     <hr style="margin: 20px 0;">
     <p style="font-size: 12px; color: #666;">
@@ -173,7 +173,7 @@ notification_agent = create_react_agent(
     - USA EXCLUSIVAMENTE gmail_send_message para enviar o email
     - NÃO uses gmail_create_draft a não ser que falhe gmail_send_message
     - O parámetro "to" deve ser uma direção de email válida
-    - O parámetro "subject" deve ser o asunto completo
+    - O parámetro "subject" deve ser o assunto completo
     - O parámetro "message" deve ser o corpo completo com texto plano
     - Se gmail_send_message falha, tenta UMA vez mais com parámetros simplificados
     

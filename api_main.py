@@ -4,6 +4,7 @@ Combines: Alert ingestion, ML detection, Playbook generation, XAI/HITL,
 SOAR execution, Gamification, Assets CRUD, and Incident management.
 """
 
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -77,6 +78,7 @@ class UserIn(BaseModel):
     full_name: Optional[str] = None
     role: str = "employee"
     department: Optional[str] = None
+    asset_id: Optional[int] = None
 
 
 class HITLReviewIn(BaseModel):
@@ -163,6 +165,49 @@ def health():
 # Alerts & Incidents (L1 → L6 pipeline)
 # ================================================================== #
 
+_IPV4_RE = re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b")
+
+
+def _resolve_asset(alert_dict: Dict, db: Session) -> Optional[Asset]:
+    """
+    Associa a alerta a um ativo da empresa:
+      1. asset_id explícito no payload;
+      2. ativo cujo IP == source_ip da alerta;
+      3. ativo cujo IP aparece na descrição ou URL (o mais crítico primeiro).
+    Devolve None se nenhum ativo corresponder.
+    """
+    explicit = alert_dict.get("asset_id")
+    if explicit:
+        a = db.query(Asset).filter(Asset.id == explicit, Asset.is_active == True).first()
+        if a:
+            return a
+
+    source_ip = (alert_dict.get("source_ip") or "").strip()
+    if source_ip:
+        a = (
+            db.query(Asset)
+            .filter(Asset.is_active == True, Asset.ip_address == source_ip)
+            .first()
+        )
+        if a:
+            return a
+
+    text_ips = set()
+    for field in ("description", "url"):
+        value = alert_dict.get(field)
+        if value:
+            text_ips.update(_IPV4_RE.findall(value))
+    text_ips.discard(source_ip)
+    if text_ips:
+        return (
+            db.query(Asset)
+            .filter(Asset.is_active == True, Asset.ip_address.in_(text_ips))
+            .order_by(Asset.criticality.desc())
+            .first()
+        )
+    return None
+
+
 def _ingest_alert(alert: AlertIn, db: Session) -> Dict:
     """
     Ingest an alert and run the full pipeline:
@@ -171,6 +216,7 @@ def _ingest_alert(alert: AlertIn, db: Session) -> Dict:
     """
     incident_id = f"INC-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
     alert_dict = alert.model_dump()
+    asset = _resolve_asset(alert_dict, db)
 
     # L2 — ML detection
     ml_score, is_anomaly, ml_explanation = ml_detector.detect(alert_dict)
@@ -197,6 +243,7 @@ def _ingest_alert(alert: AlertIn, db: Session) -> Dict:
         description=alert.description,
         severity=alert.severity,
         status="investigating" if is_anomaly else "open",
+        asset_id=asset.id if asset else None,
         alert_data=alert_dict,
         ml_score=ml_score,
         ml_explanation=ml_explanation,
@@ -212,6 +259,9 @@ def _ingest_alert(alert: AlertIn, db: Session) -> Dict:
         "incident_id": incident_id,
         "ml_score": round(ml_score, 4),
         "is_anomaly": is_anomaly,
+        "asset_id": asset.id if asset else None,
+        "asset_name": asset.name if asset else None,
+        "asset_criticality": asset.criticality if asset else None,
         "xai_summary": xai_report.get("decision_summary"),
         "recommended_action": xai_report.get("recommended_action"),
         "playbook_id": playbook_id,
@@ -236,6 +286,7 @@ def submit_alert(alert: AlertIn, db: Session = Depends(get_db)):
 def list_incidents(
     status: Optional[str] = None,
     severity: Optional[str] = None,
+    asset_id: Optional[int] = None,
     limit: int = 50,
     db: Session = Depends(get_db),
 ):
@@ -244,6 +295,8 @@ def list_incidents(
         q = q.filter(Incident.status == status)
     if severity:
         q = q.filter(Incident.severity == severity)
+    if asset_id is not None:
+        q = q.filter(Incident.asset_id == asset_id)
     incidents = q.order_by(Incident.created_at.desc()).limit(limit).all()
     return [_incident_to_dict(i) for i in incidents]
 
@@ -270,6 +323,26 @@ def update_incident_status(
         inc.resolved_at = datetime.utcnow()
     db.commit()
     return {"incident_id": incident_id, "new_status": status}
+
+
+@app.patch("/api/incidents/{incident_id}/asset", tags=["Incidentes"])
+def set_incident_asset(
+    incident_id: str,
+    asset_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """Associa (ou desassocia, com asset_id nulo) um incidente a um ativo."""
+    inc = db.query(Incident).filter(Incident.incident_id == incident_id).first()
+    if not inc:
+        raise HTTPException(404, "Incidente não encontrado")
+    if asset_id is not None:
+        a = db.query(Asset).filter(Asset.id == asset_id, Asset.is_active == True).first()
+        if not a:
+            raise HTTPException(404, "Ativo não encontrado")
+    inc.asset_id = asset_id
+    db.commit()
+    db.refresh(inc)
+    return _incident_to_dict(inc)
 
 
 # ================================================================== #
@@ -357,6 +430,9 @@ def run_attack_scenario(req: ScenarioRunIn, db: Session = Depends(get_db)):
             "ml_score": result["ml_score"],
             "hitl_required": result["hitl_required"],
             "playbook_id": result["playbook_id"],
+            "asset_id": result.get("asset_id"),
+            "asset_name": result.get("asset_name"),
+            "asset_criticality": result.get("asset_criticality"),
         })
 
         # Gamificação: uma missão de formação gerada a partir deste incidente
@@ -534,6 +610,21 @@ def create_asset(asset: AssetIn, db: Session = Depends(get_db)):
     return _asset_to_dict(a)
 
 
+@app.get("/api/assets/{asset_id}/incidents", tags=["Ativos"])
+def asset_incidents(asset_id: int, db: Session = Depends(get_db)):
+    """Lista os incidentes/alertas associados a um ativo."""
+    a = db.query(Asset).filter(Asset.id == asset_id).first()
+    if not a:
+        raise HTTPException(404, "Ativo não encontrado")
+    incidents = (
+        db.query(Incident)
+        .filter(Incident.asset_id == asset_id)
+        .order_by(Incident.created_at.desc())
+        .all()
+    )
+    return [_incident_to_dict(i) for i in incidents]
+
+
 @app.get("/api/assets/{asset_id}", tags=["Ativos"])
 def get_asset(asset_id: int, db: Session = Depends(get_db)):
     a = db.query(Asset).filter(Asset.id == asset_id, Asset.is_active == True).first()
@@ -582,6 +673,10 @@ def create_user(user: UserIn, db: Session = Depends(get_db)):
     existing = db.query(User).filter(User.username == user.username).first()
     if existing:
         raise HTTPException(400, "Username já existe")
+    if user.asset_id is not None:
+        a = db.query(Asset).filter(Asset.id == user.asset_id, Asset.is_active == True).first()
+        if not a:
+            raise HTTPException(404, "Ativo não encontrado")
     u = User(**user.model_dump())
     db.add(u)
     db.commit()
@@ -594,6 +689,25 @@ def get_user(user_id: int, db: Session = Depends(get_db)):
     u = db.query(User).filter(User.id == user_id).first()
     if not u:
         raise HTTPException(404, "Utilizador não encontrado")
+    return _user_to_dict(u)
+
+
+@app.put("/api/users/{user_id}", tags=["Utilizadores"])
+def update_user(user_id: int, user: UserIn, db: Session = Depends(get_db)):
+    u = db.query(User).filter(User.id == user_id).first()
+    if not u:
+        raise HTTPException(404, "Utilizador não encontrado")
+    existing = db.query(User).filter(User.username == user.username, User.id != user_id).first()
+    if existing:
+        raise HTTPException(400, "Username já existe")
+    if user.asset_id is not None:
+        a = db.query(Asset).filter(Asset.id == user.asset_id, Asset.is_active == True).first()
+        if not a:
+            raise HTTPException(404, "Ativo não encontrado")
+    for field, value in user.model_dump().items():
+        setattr(u, field, value)
+    db.commit()
+    db.refresh(u)
     return _user_to_dict(u)
 
 
@@ -1096,6 +1210,9 @@ def _incident_to_dict(inc: Incident) -> Dict:
         "description": inc.description,
         "severity": inc.severity,
         "status": inc.status,
+        "asset_id": inc.asset_id,
+        "asset_name": inc.asset.name if inc.asset else None,
+        "asset_criticality": inc.asset.criticality if inc.asset else None,
         "is_true_positive": inc.is_true_positive,
         "ml_score": inc.ml_score,
         "playbook_id": inc.playbook_id,
@@ -1159,6 +1276,8 @@ def _user_to_dict(u: User) -> Dict:
         "missions_completed": u.missions_completed or 0,
         "risk_score": u.risk_score or 50.0,
         "badges": u.badges or [],
+        "asset_id": u.asset_id,
+        "asset_name": u.asset.name if u.asset else None,
         "created_at": u.created_at.isoformat() if u.created_at else None,
     }
 

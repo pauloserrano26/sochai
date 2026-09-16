@@ -51,9 +51,11 @@ class User(Base):
     missions_completed = Column(Integer, default=0)
     risk_score = Column(Float, default=0.0)   # Human Risk Score (0-100)
     badges = Column(JSON, default=list)
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True)  # ativo associado ao utilizador
     created_at = Column(DateTime, default=datetime.utcnow)
 
     missions = relationship("UserMission", back_populates="user")
+    asset = relationship("Asset", backref="users")
 
 
 class Incident(Base):
@@ -65,6 +67,7 @@ class Incident(Base):
     description = Column(Text)
     severity = Column(String(20))             # CRITICA, ALTA, MEDIA, BAIXA
     status = Column(String(50), default="open")  # open, investigating, resolved, closed
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True)  # ativo afetado
     is_true_positive = Column(Boolean, nullable=True)
     alert_data = Column(JSON)
     analysis_result = Column(Text)
@@ -81,6 +84,8 @@ class Incident(Base):
     reviewed_at = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
     resolved_at = Column(DateTime)
+
+    asset = relationship("Asset", backref="incidents")
 
 
 class Playbook(Base):
@@ -241,6 +246,30 @@ class PhishingTarget(Base):
 
 def create_tables():
     Base.metadata.create_all(bind=engine)
+
+
+def run_migrations():
+    """Migrações leves para bases de dados criadas antes de novas colunas.
+    (SQLite `create_all` não altera tabelas existentes.)"""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if "incidents" not in inspector.get_table_names():
+        return
+    existing_cols = {c["name"] for c in inspector.get_columns("incidents")}
+    if "asset_id" not in existing_cols:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE incidents ADD COLUMN asset_id INTEGER REFERENCES assets(id)"
+            ))
+
+    if "users" in inspector.get_table_names():
+        existing_user_cols = {c["name"] for c in inspector.get_columns("users")}
+        if "asset_id" not in existing_user_cols:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN asset_id INTEGER REFERENCES assets(id)"
+                ))
 
 
 def get_db():
@@ -545,4 +574,5 @@ def seed_default_data():
 
 # Initialize on import
 create_tables()
+run_migrations()
 seed_default_data()

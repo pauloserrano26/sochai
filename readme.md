@@ -95,6 +95,31 @@ O dashboard fica disponível em `http://127.0.0.1:8000`.
 
 ---
 
+## Acessos e níveis de permissão
+
+O dashboard (`streamlit run dashboard.py`) tem agora ecrã de início de sessão
+(módulo [`auth.py`](./auth.py)). Há dois níveis:
+
+| Nível         | Acesso |
+|---------------|--------|
+| `staff`       | Plataforma SOC completa (todas as tabs) + gestão de acessos |
+| `colaborador` | Apenas **Gamificação**, **Playbooks** e **Incidentes** (vista de acompanhamento — em curso / por resolver / resolvidos, só leitura) — ver [`portal_colaborador.py`](./portal_colaborador.py) |
+
+Credenciais iniciais (criadas no primeiro arranque em `users_auth.json`, que
+**não** é versionado):
+
+| Utilizador    | Palavra-passe | Nível        |
+|---------------|---------------|--------------|
+| `admin`       | `sochai123`   | staff        |
+| `analista`    | `sochai123`   | staff        |
+| `colaborador` | `colab123`    | colaborador  |
+
+Um utilizador `staff` cria novos acessos de colaborador na barra lateral
+(**👥 Gerir acessos ao portal**). As palavras-passe são guardadas apenas como
+hash SHA-256.
+
+---
+
 ## Testes
 
 ```bash
