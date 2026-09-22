@@ -244,6 +244,23 @@ class PhishingTarget(Base):
     campaign = relationship("PhishingCampaign", back_populates="targets")
 
 
+class RiskEvent(Base):
+    """Histórico do Human Risk Score: um registo por cada alteração do HRS de um colaborador."""
+    __tablename__ = "risk_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    username = Column(String(100))
+    event_type = Column(String(30))           # mission, phishing_sim, phishing_report
+    detail = Column(String(200))              # cenário / desfecho
+    difficulty = Column(String(20))
+    score_percentage = Column(Float)          # só para missões
+    risk_score = Column(Float)                # HRS após o evento
+    risk_delta = Column(Float, default=0.0)
+    xp_total = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 def create_tables():
     Base.metadata.create_all(bind=engine)
 

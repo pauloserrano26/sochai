@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from config import config
 from database import (
     Asset, GamificationMission, Incident, Playbook, PhishingReport,
-    PhishingCampaign, PhishingTarget,
+    PhishingCampaign, PhishingTarget, RiskEvent,
     SessionLocal, User, UserMission, get_db,
 )
 from gamification import gamification_engine, GamificationEngine
@@ -763,11 +763,17 @@ def submit_mission(
     user.level = GamificationEngine.calculate_level(user.xp_points)
 
     # Update risk score
+    old_risk = user.risk_score or 50.0
     user.risk_score = GamificationEngine.update_risk_score(
         user.risk_score or 50.0,
         user.missions_completed,
         result["score_percentage"],
         False,
+    )
+
+    _log_risk_event(
+        db, user, "mission", scenario_id, sc.get("difficulty"),
+        result["score_percentage"], old_risk,
     )
 
     # Check new badges
@@ -855,7 +861,9 @@ def report_phishing(payload: PhishingReportIn, db: Session = Depends(get_db)):
     # Atualizar o colaborador: XP, risco humano e medalhas
     user.xp_points = (user.xp_points or 0) + reward["xp_awarded"]
     user.level = GamificationEngine.calculate_level(user.xp_points)
+    _old_risk = user.risk_score or 50.0
     user.risk_score = reward["new_risk_score"]
+    _log_risk_event(db, user, "phishing_report", "report", None, None, _old_risk)
 
     total_reports = db.query(PhishingReport).filter(
         PhishingReport.reporter_id == user.id
@@ -1052,7 +1060,11 @@ def record_outcome(campaign_id: str, payload: OutcomeIn, db: Session = Depends(g
     # Atualizar o colaborador
     user.xp_points = max(0, (user.xp_points or 0) + reward["xp_delta"])
     user.level = GamificationEngine.calculate_level(user.xp_points)
+    _old_risk = user.risk_score or 50.0
     user.risk_score = reward["new_risk_score"]
+    _log_risk_event(
+        db, user, "phishing_sim", payload.outcome, campaign.difficulty, None, _old_risk,
+    )
     db.commit()
 
     resp = {
@@ -1120,6 +1132,27 @@ def campaign_detail(campaign_id: str, db: Session = Depends(get_db)):
         ),
         "targets": targets,
     }
+
+
+def _log_risk_event(db, user, event_type, detail, difficulty, score_pct, old_risk):
+    db.add(RiskEvent(
+        user_id=user.id, username=user.username, event_type=event_type,
+        detail=str(detail)[:200], difficulty=difficulty, score_percentage=score_pct,
+        risk_score=user.risk_score, risk_delta=round((user.risk_score or 0) - old_risk, 2),
+        xp_total=user.xp_points or 0,
+    ))
+
+
+@app.get("/api/gamification/history", tags=["Gamificação"])
+def gamification_history(db: Session = Depends(get_db)):
+    """Histórico cronológico de alterações do HRS de todos os colaboradores."""
+    return [{
+        "user_id": e.user_id, "username": e.username, "event_type": e.event_type,
+        "detail": e.detail, "difficulty": e.difficulty,
+        "score_percentage": e.score_percentage, "risk_score": e.risk_score,
+        "risk_delta": e.risk_delta, "xp_total": e.xp_total,
+        "created_at": e.created_at.isoformat() if e.created_at else None,
+    } for e in db.query(RiskEvent).order_by(RiskEvent.created_at, RiskEvent.id).all()]
 
 
 @app.get("/api/gamification/leaderboard", tags=["Gamificação"])
