@@ -1701,9 +1701,10 @@ with tabs[7]:
             "Cada nível reflete a competência acumulada (XP). Compara o HRS médio, "
             "a taxa de aprovação em missões e o número de colaboradores em cada nível."
         )
+        _den_lv = _dfu["Missões feitas"].astype(float)
         _dfu["Taxa aprovação (%)"] = (
-            _dfu["Missões aprovadas"] / _dfu["Missões feitas"].replace(0, pd.NA) * 100
-        ).astype(float).round(0)
+            _dfu["Missões aprovadas"].astype(float) / _den_lv.where(_den_lv > 0) * 100
+        ).round(0)
         _dlv = _dfu.groupby("Nível").agg(
             Colaboradores=("Colaborador", "count"),
             HRS_médio=("HRS", "mean"),
