@@ -1,6 +1,6 @@
 # MESI SOCHAI Dashboard
 
-Plataforma de SOCHAI (Security Operations Center Human Artificail Inteligence) com componente de treino gamificado para analistas júnior, desenvolvida no âmbito do **Mestrado em
+Plataforma de SOCHAI (Security Operations Center Human Artificial Inteligence) com componente de treino gamificado para colaboradores e analistas júnior, desenvolvida no âmbito do **Mestrado em
 Engenharia de Segurança Informática (MESI)** — ano letivo 2025/26,
 Instituto Politécnico de Beja (IPBeja).
 
@@ -19,7 +19,7 @@ Cortex XSIAM, que sirva simultaneamente para:
 - **Operação:** ingestão e normalização de eventos, correlação e deteção
   mapeada à matriz MITRE ATT&CK, e visualização de alertas em tempo real.
 - **Treino:** ambiente gamificado (missões, desafios CTF, XP, ranks, badges)
-  para desenvolvimento de competências de analistas em formação.
+  para desenvolvimento de competências de colaboradores e analistas em formação.
 
 ---
 
