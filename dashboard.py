@@ -1630,10 +1630,220 @@ with tabs[7]:
 
     st.header("📈 Resultados & Evolução — Gamificação (L5)")
     st.caption(
-        "Evolução do Human Risk Score (HRS) e resultados finais de duas simulações "
-        "reprodutíveis, ambas sobre o motor real (GamificationEngine): **percurso "
-        "individual** (`simulacao_treino.py`) e **amostra populacional** n=15, "
-        "seed=42 (`simulacao_populacional.py`)."
+        "Resultados calculados em tempo real a partir dos **colaboradores registados** "
+        "(HRS, XP, missões, badges e campanhas de phishing). Atualiza sempre que o "
+        "separador é aberto ou o botão de atualizar é usado."
+    )
+
+    if st.button("🔄 Atualizar resultados", key="res_refresh"):
+        st.rerun()
+
+    _live_users = api("get", "/api/users")
+    _live_camps = api("get", "/api/phishing/campaigns")
+
+    if not isinstance(_live_users, list) or not _live_users:
+        st.warning("Sem colaboradores para analisar (API offline ou sem utilizadores registados).")
+    else:
+        _staff = [u for u in _live_users if (u.get("role") or "").lower() != "admin"] or _live_users
+        _dfu = pd.DataFrame([{
+            "Colaborador": u.get("full_name") or u.get("username"),
+            "Utilizador": u.get("username"),
+            "Departamento": u.get("department") or "—",
+            "HRS": float(u.get("risk_score") or 0),
+            "XP": int(u.get("xp_points") or 0),
+            "Nível": int(u.get("level") or 1),
+            "Missões feitas": int(u.get("total_missions") or 0),
+            "Missões aprovadas": int(u.get("missions_completed") or 0),
+            "Badges": len(u.get("badges") or []),
+        } for u in _staff])
+
+        def _hrs_band(v):
+            return "Alto (≥50)" if v >= 50 else "Médio (20–50)" if v >= 20 else "Baixo (<20)"
+
+        _dfu["Banda"] = _dfu["HRS"].map(_hrs_band)
+        _avg = _dfu["HRS"].mean()
+
+        st.divider()
+        st.subheader("1 · Visão geral dos colaboradores")
+        _kc = st.columns(5)
+        _kc[0].markdown(metric_card("Colaboradores", len(_dfu)), unsafe_allow_html=True)
+        _kc[1].markdown(metric_card(
+            "HRS médio", f"{_avg:.1f}",
+            "red" if _avg >= 50 else "yellow" if _avg >= 20 else "green",
+        ), unsafe_allow_html=True)
+        _kc[2].markdown(metric_card("HRS ≥ 50", int((_dfu["HRS"] >= 50).sum()), "red"), unsafe_allow_html=True)
+        _kc[3].markdown(metric_card("XP total", int(_dfu["XP"].sum())), unsafe_allow_html=True)
+        _kc[4].markdown(metric_card(
+            "Com formação", f"{int((_dfu['Missões aprovadas'] > 0).sum())}/{len(_dfu)}"
+        ), unsafe_allow_html=True)
+
+        _order = _dfu.sort_values("HRS", ascending=False)["Colaborador"].tolist()
+        st.altair_chart(
+            alt.Chart(_dfu).mark_bar().encode(
+                y=alt.Y("Colaborador:N", sort=_order, title=None),
+                x=alt.X("HRS:Q", scale=alt.Scale(domain=[0, 100]), title="Human Risk Score"),
+                color=alt.Color("Banda:N", scale=alt.Scale(
+                    domain=["Baixo (<20)", "Médio (20–50)", "Alto (≥50)"],
+                    range=["#2fd07a", "#f5c451", "#ff5d6c"],
+                ), legend=alt.Legend(orient="top")),
+                tooltip=["Colaborador", "Departamento", "HRS", "XP", "Nível"],
+            ),
+            use_container_width=True,
+        )
+        st.dataframe(
+            _dfu.drop(columns=["Utilizador", "Banda"]).sort_values("HRS", ascending=False),
+            use_container_width=True, hide_index=True,
+        )
+
+        st.divider()
+        st.subheader("2 · Desempenho por nível e competência")
+        st.caption(
+            "Cada nível reflete a competência acumulada (XP). Compara o HRS médio, "
+            "a taxa de aprovação em missões e o número de colaboradores em cada nível."
+        )
+        _dfu["Taxa aprovação (%)"] = (
+            _dfu["Missões aprovadas"] / _dfu["Missões feitas"].replace(0, pd.NA) * 100
+        ).astype(float).round(0)
+        _dlv = _dfu.groupby("Nível").agg(
+            Colaboradores=("Colaborador", "count"),
+            HRS_médio=("HRS", "mean"),
+            XP_médio=("XP", "mean"),
+            **{"Taxa aprovação (%)": ("Taxa aprovação (%)", "mean")},
+        ).reset_index().round(1).sort_values("Nível")
+        _lv1, _lv2 = st.columns(2)
+        with _lv1:
+            st.altair_chart(
+                alt.Chart(_dlv).mark_bar().encode(
+                    x=alt.X("Nível:O", title="Nível"),
+                    y=alt.Y("HRS_médio:Q", scale=alt.Scale(domain=[0, 100]), title="HRS médio"),
+                    tooltip=["Nível", "Colaboradores", "HRS_médio"],
+                ),
+                use_container_width=True,
+            )
+        with _lv2:
+            st.altair_chart(
+                alt.Chart(_dlv).mark_bar(color="#3aa0ff").encode(
+                    x=alt.X("Nível:O", title="Nível"),
+                    y=alt.Y("Taxa aprovação (%):Q", scale=alt.Scale(domain=[0, 100])),
+                    tooltip=["Nível", "Colaboradores", "Taxa aprovação (%)"],
+                ),
+                use_container_width=True,
+            )
+        st.dataframe(_dlv, use_container_width=True, hide_index=True)
+
+        st.divider()
+        st.subheader("2b · Evolução do Risk Score dos colaboradores")
+        _hist = api("get", "/api/gamification/history")
+        if isinstance(_hist, list) and _hist:
+            _dh = pd.DataFrame(_hist)
+            _dh["created_at"] = pd.to_datetime(_dh["created_at"], errors="coerce")
+            _names_h = dict(zip(_dfu["Utilizador"], _dfu["Colaborador"]))
+            _dh["Colaborador"] = _dh["username"].map(_names_h).fillna(_dh["username"])
+            _dh = _dh.sort_values(["user_id", "created_at"])
+            _dh["Passo"] = _dh.groupby("user_id").cumcount() + 1
+            _EV = {"mission": "Missão", "phishing_sim": "Simulação phishing", "phishing_report": "Reporte phishing"}
+            _dh["Evento"] = _dh["event_type"].map(_EV).fillna(_dh["event_type"])
+
+            _people = sorted(_dh["Colaborador"].unique().tolist())
+            _sel = st.multiselect(
+                "Colaboradores a mostrar", _people, default=_people[: min(6, len(_people))],
+            )
+            _dhs = _dh[_dh["Colaborador"].isin(_sel)] if _sel else _dh
+
+            _rule_h = alt.Chart(pd.DataFrame({"y": [20, 50]})).mark_rule(
+                strokeDash=[4, 4], color="#8899aa"
+            ).encode(y="y:Q")
+            _line_h = alt.Chart(_dhs).mark_line(point=True).encode(
+                x=alt.X("Passo:O", title="Evento (ordem cronológica)"),
+                y=alt.Y("risk_score:Q", scale=alt.Scale(domain=[0, 100]), title="Human Risk Score"),
+                color=alt.Color("Colaborador:N", legend=alt.Legend(orient="top")),
+                tooltip=["Colaborador", "Passo", "Evento", "detail", "risk_score", "risk_delta"],
+            )
+            st.altair_chart(_rule_h + _line_h, use_container_width=True)
+
+            st.dataframe(
+                _dh[["Colaborador", "Evento", "detail", "difficulty", "risk_score", "risk_delta", "created_at"]]
+                .rename(columns={"detail": "Detalhe", "difficulty": "Dificuldade",
+                                  "risk_score": "HRS", "risk_delta": "Δ HRS", "created_at": "Data/Hora"})
+                .sort_values("Data/Hora", ascending=False),
+                use_container_width=True, hide_index=True,
+            )
+        else:
+            st.info(
+                "Ainda não há histórico de eventos de risco. O histórico começa a partir de agora "
+                "— missões, simulações de phishing e reportes futuros vão aparecer aqui."
+            )
+
+        st.divider()
+        st.subheader("3 · Risco e formação por departamento")
+        _dd = _dfu.groupby("Departamento").agg(
+            Colaboradores=("Colaborador", "count"),
+            HRS_médio=("HRS", "mean"),
+            XP_médio=("XP", "mean"),
+            Missões_aprovadas=("Missões aprovadas", "sum"),
+        ).reset_index().round(1)
+        st.altair_chart(
+            alt.Chart(_dd).mark_bar().encode(
+                x=alt.X("Departamento:N", title=None),
+                y=alt.Y("HRS_médio:Q", scale=alt.Scale(domain=[0, 100]), title="HRS médio"),
+                tooltip=["Departamento", "Colaboradores", "HRS_médio", "XP_médio", "Missões_aprovadas"],
+            ),
+            use_container_width=True,
+        )
+
+        st.divider()
+        st.subheader("4 · Campanhas de phishing — resultado por colaborador")
+        _rows_ph = []
+        if isinstance(_live_camps, list):
+            for _c in _live_camps:
+                _det = api("get", f"/api/phishing/campaigns/{_c['campaign_id']}")
+                for _t in (_det.get("targets") or []) if isinstance(_det, dict) else []:
+                    _rows_ph.append({
+                        "Campanha": _c["name"],
+                        "Utilizador": _t["username"],
+                        "Desfecho": _t["outcome"],
+                        "Tempo (s)": _t.get("time_to_action_seconds"),
+                    })
+        if _rows_ph:
+            _dph = pd.DataFrame(_rows_ph)
+            _names = dict(zip(_dfu["Utilizador"], _dfu["Colaborador"]))
+            _dph["Colaborador"] = _dph["Utilizador"].map(_names).fillna(_dph["Utilizador"])
+            _pv = _dph.pivot_table(
+                index="Colaborador", columns="Desfecho", values="Campanha",
+                aggfunc="count", fill_value=0,
+            ).reset_index()
+            for _o in ("reported", "ignored", "clicked"):
+                if _o not in _pv:
+                    _pv[_o] = 0
+            _den_pv = (_pv["reported"] + _pv["clicked"]).astype(float)
+            _pv["Resiliência (%)"] = (
+                _pv["reported"].astype(float) / _den_pv.where(_den_pv > 0) * 100
+            ).round(0)
+            st.dataframe(
+                _pv.rename(columns={"reported": "Reportou", "ignored": "Ignorou", "clicked": "Clicou"}),
+                use_container_width=True, hide_index=True,
+            )
+            _tc = _dph["Desfecho"].value_counts()
+            _den = _tc.get("reported", 0) + _tc.get("clicked", 0)
+            _oc = st.columns(3)
+            _oc[0].markdown(metric_card("Cliques", int(_tc.get("clicked", 0)), "red"), unsafe_allow_html=True)
+            _oc[1].markdown(metric_card("Reportes", int(_tc.get("reported", 0)), "green"), unsafe_allow_html=True)
+            _oc[2].markdown(metric_card(
+                "Resiliência global",
+                f"{_tc.get('reported', 0) / _den * 100:.0f}%" if _den else "—",
+            ), unsafe_allow_html=True)
+        else:
+            st.info("Ainda não há campanhas de phishing com alvos. Lance uma no separador Gamificação.")
+
+    st.divider()
+    if not st.toggle("🧪 Mostrar simulações sintéticas de referência (n=15, seed=42)", key="res_show_sim"):
+        st.stop()
+
+    st.subheader("Simulações sintéticas de referência")
+    st.caption(
+        "Duas simulações reprodutíveis sobre o motor real (GamificationEngine): "
+        "**percurso individual** (`simulacao_treino.py`) e **amostra populacional** "
+        "(`simulacao_populacional.py`). Não dependem dos colaboradores reais."
     )
 
     _BASE = _Path(__file__).resolve().parent
