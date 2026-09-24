@@ -409,8 +409,26 @@ def run_tests():
         assert d["incidents"]["total"] >= 1
         assert "assets" in d and "users" in d
         assert "hitl" in d and "soar" in d
+        assert "kpis" in d
 
     test("Overview analytics completo", test_overview)
+
+    def test_kpis():
+        r = get("/api/analytics/kpis")
+        assert r.status_code == 200
+        d = r.json()
+        # Tempos e rácios podem ser nulos (sem amostra), mas as chaves existem
+        # sempre e as contagens têm de bater certo com os alertas recebidos.
+        for key in ("mtti_minutes", "mttr_minutes", "sla_compliance_pct",
+                    "false_positive_rate_pct", "mttr_by_severity"):
+            assert key in d
+        assert d["total_alerts"] >= 1
+        assert d["triaged_count"] <= d["total_alerts"]
+        assert d["resolved_count"] <= d["total_alerts"]
+        if d["sla_compliance_pct"] is not None:
+            assert 0 <= d["sla_compliance_pct"] <= 100
+
+    test("KPIs de desempenho (MTTI/MTTR/SLA)", test_kpis)
 
     # ------------------------------------------------------------------ #
     # 9. Seguranca

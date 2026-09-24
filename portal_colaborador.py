@@ -16,7 +16,9 @@ from typing import Optional
 import requests
 import streamlit as st
 
-API_BASE = "http://localhost:8000"
+# 127.0.0.1 e não "localhost" — ver a nota em dashboard.py: "localhost" resolve
+# primeiro para ::1 e a API só escuta em IPv4, custando ~2 s por pedido.
+API_BASE = "http://127.0.0.1:8000"
 
 _EM_CURSO = ("open", "investigating")
 _RESOLVIDOS = ("resolved", "closed")
@@ -52,12 +54,17 @@ def _status_label(s: str) -> str:
 # Incidentes (só leitura)
 # ------------------------------------------------------------------ #
 
-def _render_incident(inc: dict) -> None:
+def _render_incident(inc: dict, own_user_id: Optional[int] = None) -> None:
     sev = inc.get("severity", "MEDIA")
-    with st.expander(
-        f"{_sev_icon(sev)} [{inc.get('incident_id', '—')}] {inc.get('title', '—')} "
-        f"— {_status_label(inc.get('status', ''))}"
-    ):
+    owners = inc.get("asset_owners") or []
+    is_mine = own_user_id is not None and any(o.get("user_id") == own_user_id for o in owners)
+    title = (
+        f"{_sev_icon(sev)} {'🎯 ' if is_mine else ''}[{inc.get('incident_id', '—')}] "
+        f"{inc.get('title', '—')} — {_status_label(inc.get('status', ''))}"
+    )
+    with st.expander(title):
+        if is_mine:
+            st.warning("🎯 Este incidente afetou um ativo associado a ti.")
         c1, c2, c3 = st.columns(3)
         c1.metric("Severidade", (sev or "—").title())
         c2.metric("ML Score", f"{(inc.get('ml_score') or 0):.2f}")
@@ -74,7 +81,7 @@ def _render_incident(inc: dict) -> None:
             st.write(inc["description"])
 
 
-def _tab_incidentes() -> None:
+def _tab_incidentes(own_user_id: Optional[int] = None) -> None:
     st.subheader("🚨 Incidentes")
     st.caption("Vista de acompanhamento — só leitura. A gestão dos incidentes é feita pela equipa SOC.")
 
@@ -85,19 +92,26 @@ def _tab_incidentes() -> None:
     if not isinstance(incidents, list):
         incidents = []
 
+    def _is_mine(i: dict) -> bool:
+        return own_user_id is not None and any(
+            o.get("user_id") == own_user_id for o in (i.get("asset_owners") or [])
+        )
+
     em_curso = [i for i in incidents if i.get("status") in _EM_CURSO]
     por_resolver = [i for i in incidents if i.get("status") == "open"]
     resolvidos = [i for i in incidents if i.get("status") in _RESOLVIDOS]
+    meus = [i for i in incidents if _is_mine(i)]
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("🔴 Em curso", len(em_curso))
     c2.metric("🟠 Por resolver", len(por_resolver))
     c3.metric("🟢 Resolvidos", len(resolvidos))
+    c4.metric("🎯 No meu ativo", len(meus))
     st.divider()
 
     sec = st.radio(
         "Ver",
-        ["Em curso", "Por resolver", "Resolvidos", "Todos"],
+        ["Em curso", "Por resolver", "Resolvidos", "No meu ativo", "Todos"],
         horizontal=True,
         key="colab_inc_sec",
     )
@@ -105,6 +119,7 @@ def _tab_incidentes() -> None:
         "Em curso": em_curso,
         "Por resolver": por_resolver,
         "Resolvidos": resolvidos,
+        "No meu ativo": meus,
         "Todos": incidents,
     }
     alvo = grupos[sec]
@@ -112,7 +127,7 @@ def _tab_incidentes() -> None:
         st.info("Sem incidentes nesta categoria.")
         return
     for inc in alvo:
-        _render_incident(inc)
+        _render_incident(inc, own_user_id)
 
 
 # ------------------------------------------------------------------ #
@@ -220,13 +235,26 @@ def _gam_missoes(profile_user_id: Optional[int]) -> None:
         st.info("Sem cenários disponíveis.")
         return
 
+    # Missões geradas a partir de um incidente real no ativo deste colaborador
+    # aparecem primeiro, com destaque — são as mais relevantes para ele.
+    def _is_targeted(sc: dict) -> bool:
+        return profile_user_id is not None and sc.get("target_user_id") == profile_user_id
+
+    scenarios = sorted(scenarios, key=lambda sc: not _is_targeted(sc))
+
     for sc in scenarios:
         diff = sc.get("difficulty", "INTERMEDIO")
         questions = sc.get("questions", [])
+        targeted = _is_targeted(sc)
         with st.expander(
-            f"{diff_icons.get(diff, '⚪')} **{sc['title']}** | {diff} | "
+            f"{diff_icons.get(diff, '⚪')} {'🎯 ' if targeted else ''}**{sc['title']}** | {diff} | "
             f"⭐ {sc.get('xp_reward', 0)} XP | {len(questions)} questão(ões)"
         ):
+            if targeted:
+                st.warning(
+                    f"🎯 Missão gerada especificamente para ti, a partir de um incidente "
+                    f"real no ativo **{sc.get('asset_name', '—')}**."
+                )
             st.write(sc.get("description", ""))
             st.caption(f"Tipo: {sc.get('type', '—')}")
             user_id = _own_user_id(profile_user_id, f"colab_user_sel_{sc['id']}")
@@ -400,4 +428,4 @@ def render(user: dict) -> None:
     with tabs[1]:
         _tab_playbooks()
     with tabs[2]:
-        _tab_incidentes()
+        _tab_incidentes(profile_user_id)

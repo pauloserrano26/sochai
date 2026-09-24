@@ -77,7 +77,9 @@ test("Criar/apagar incidente", test_create_incident)
 # ------------------------------------------------------------------ #
 print("\n[2] ML Detection (L2 - Isolation Forest)")
 
-from ml_detection import ml_detector
+from ml_detection import get_ml_detector
+
+ml_detector = get_ml_detector()
 
 def test_ml_normal():
     score, is_anomaly, expl = ml_detector.detect({

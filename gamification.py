@@ -6,11 +6,23 @@ XP/levels, and the SOCHAI Risk Score for human collaborators.
 
 import json
 import re
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from langchain_openai import ChatOpenAI
 from config import config
+
+
+def _new_scenario_id(prefix: str) -> str:
+    """
+    Identificador único de missão.
+
+    O sufixo aleatório é indispensável: um cenário gera várias missões no mesmo
+    segundo (uma por incidente, uma por dono do ativo), e só o timestamp não
+    chega para as distinguir.
+    """
+    return f"{prefix}-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
 
 
 # ------------------------------------------------------------------ #
@@ -325,18 +337,58 @@ _DEFAULT_SCENARIOS: List[Dict] = [
 class GamificationEngine:
     """Manages training missions, scoring, XP, and risk scores."""
 
+    # Erros de LLM que não valem uma segunda tentativa: chave inválida ou conta
+    # sem crédito não se resolvem por insistência. Ao primeiro, a geração por
+    # modelo é desativada nesta sessão — de outro modo cada missão de um cenário
+    # paga ~10 s de tentativas condenadas antes de cair no template.
+    _LLM_FATAL_MARKERS = (
+        "insufficient_quota",
+        "credit_balance_exhausted",
+        "invalid_api_key",
+        "error code: 401",
+        "error code: 429",
+    )
+
     def __init__(self):
         self._scenarios: List[Dict] = list(_DEFAULT_SCENARIOS)
         self._llm = None  # lazy — created on first use
+        self._llm_offline_reason: Optional[str] = None
 
     def _get_llm(self):
         if self._llm is None:
+            from langchain_openai import ChatOpenAI
             self._llm = ChatOpenAI(
                 model="gpt-4o-mini",
                 api_key=config.OPENAI_API_KEY,
                 temperature=0.7,
+                # A latência desta chamada é dominada pelos tokens de saída, e o
+                # cenário pedido cabe folgadamente em 700.
+                max_tokens=700,
+                # Sem timeout, uma chamada pendurada só termina no limite do
+                # cliente (120 s) e leva com ela a submissão do alerta.
+                timeout=25,
+                max_retries=1,
             )
         return self._llm
+
+    def _llm_unavailable_reason(self) -> Optional[str]:
+        """Motivo para nem tentar o modelo, ou None se vale a pena tentar."""
+        if not config.llm_available():
+            return "sem OPENAI_API_KEY configurada — cenário gerado a partir de template"
+        return self._llm_offline_reason
+
+    def _note_llm_failure(self, exc: Exception) -> None:
+        """Desativa a geração por LLM se o erro for de chave ou de crédito."""
+        msg = str(exc)
+        if any(m in msg.lower() for m in self._LLM_FATAL_MARKERS):
+            self._llm_offline_reason = (
+                f"geração por LLM indisponível nesta sessão ({msg[:120]}) — "
+                "cenário gerado a partir de template"
+            )
+            print(
+                "[SOCHAI] L5: geração de cenários por LLM desativada nesta sessão — "
+                f"{msg[:160]}"
+            )
 
     # ------------------------------------------------------------------ #
     # Scenarios
@@ -355,6 +407,51 @@ class GamificationEngine:
         Use LLM to create a training scenario derived from a real incident.
         Falls back to a template scenario on error.
         """
+        sc = self._build_from_incident(incident_data)
+        self._scenarios.append(sc)
+        return sc
+
+    def generate_from_incidents(
+        self, incidents: List[Dict], max_workers: int = 8
+    ) -> List[Dict]:
+        """
+        Versão em lote de generate_from_incident.
+
+        Cada cenário é uma chamada LLM independente e limitada por I/O, pelo que
+        as gerações correm em paralelo: um cenário de 12 incidentes deixa de
+        somar 12 esperas e passa a custar o tempo da chamada mais lenta de cada
+        vaga. A ordem da lista devolvida acompanha a dos incidentes recebidos.
+        """
+        if not incidents:
+            return []
+        if len(incidents) == 1:
+            return [self.generate_from_incident(incidents[0])]
+
+        # Instanciar o cliente aqui, e não dentro das threads, evita que várias
+        # o construam ao mesmo tempo na primeira utilização.
+        if config.llm_available():
+            try:
+                self._get_llm()
+            except Exception:
+                pass
+
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(incidents))) as pool:
+            built = list(pool.map(self._build_from_incident, incidents))
+
+        # O registo fica na thread principal para a lista de cenários manter a
+        # ordem dos incidentes — é nessa sequência que o dashboard os apresenta.
+        self._scenarios.extend(built)
+        return built
+
+    def _build_from_incident(self, incident_data: Dict) -> Dict:
+        """
+        Constrói o cenário de treino de um incidente (chamada LLM, com fallback
+        para template) sem o registar na lista de cenários.
+        """
+        offline = self._llm_unavailable_reason()
+        if offline:
+            return self._fallback_scenario(incident_data, offline)
+
         prompt = f"""És um formador de cibersegurança. Cria um cenário de treino gamificado \
 baseado neste incidente real, SEM revelar dados sensíveis ou reais.
 
@@ -365,7 +462,7 @@ INCIDENTE (resumo):
 
 Cria um cenário realista e envolvente com:
 - Título e descrição em contexto empresarial português
-- 2-3 perguntas de múltipla escolha pedagógicas
+- Exatamente 2 perguntas de múltipla escolha pedagógicas
 - Explicações educativas para cada resposta
 
 Responde APENAS em JSON válido:
@@ -391,17 +488,22 @@ Responde APENAS em JSON válido:
             if not match:
                 raise ValueError("No JSON in LLM response")
             sc = json.loads(match.group())
-            sc["id"] = f"SC-GEN-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            sc["id"] = _new_scenario_id("SC-GEN")
             sc["generated"] = True
             sc["source_incident"] = incident_data.get("incident_id", "unknown")
-            self._scenarios.append(sc)
-            return sc
         except Exception as exc:
-            return self._fallback_scenario(incident_data, str(exc))
+            self._note_llm_failure(exc)
+            sc = self._fallback_scenario(incident_data, str(exc))
+
+        # Devolvido por qualquer dos caminhos — um cenário de fallback (sem chave
+        # LLM configurada, ou chamada falhada) tem de ficar visível aos
+        # colaboradores tal como os gerados pelo modelo. Quem chama é que o
+        # regista, para que o lote acima possa preservar a ordem.
+        return sc
 
     def add_scenario(self, scenario: Dict) -> Dict:
         if "id" not in scenario:
-            scenario["id"] = f"SC-CUSTOM-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            scenario["id"] = _new_scenario_id("SC-CUSTOM")
         self._scenarios.append(scenario)
         return scenario
 
@@ -725,7 +827,7 @@ Responde APENAS em JSON válido:
     def _fallback_scenario(incident_data: Dict, error: str) -> Dict:
         ttype = incident_data.get("type", "malware")
         return {
-            "id": f"SC-FB-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            "id": _new_scenario_id("SC-FB"),
             "title": f"Cenário: Incidente de {ttype.title()}",
             "description": (
                 f"A sua organização detetou um incidente de segurança do tipo {ttype}. "

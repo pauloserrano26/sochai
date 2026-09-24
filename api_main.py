@@ -6,31 +6,56 @@ SOAR execution, Gamification, Assets CRUD, and Incident management.
 
 import re
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+import asset_threat_model
 from config import config
 from database import (
-    Asset, GamificationMission, Incident, Playbook, PhishingReport,
+    Asset, AssetRelation, GamificationMission, Incident, Playbook, PhishingReport,
     PhishingCampaign, PhishingTarget, RiskEvent,
     SessionLocal, User, UserMission, get_db,
 )
 from gamification import gamification_engine, GamificationEngine
-from ml_detection import ml_detector
+from ml_detection import get_ml_detector
 from playbook_engine import playbook_engine
 from scenario_data import CENARIOS, ATTACK_SCENARIOS
 from soar_executor import soar_executor
 from xai_hitl import hitl_manager, xai_explainer
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Aquece as camadas L2 e L3 no arranque.
+
+    O detetor L2 importa o sklearn e treina a Isolation Forest na primeira
+    utilização (~3 s). Feito aqui, esse custo deixa de cair no primeiro alerta
+    submetido — que numa demonstração é precisamente o que se está a mostrar.
+    """
+    try:
+        get_ml_detector().detect({
+            "type": "scan",
+            "description": "warm-up interno do detetor L2 (nenhum incidente criado)",
+            "severity": "BAIXA",
+        })
+        playbook_engine.retrieve("warm-up", top_k=1)
+        print("[SOCHAI] L2/L3 aquecidos — o primeiro alerta já não paga o arranque.")
+    except Exception as exc:
+        print(f"[AVISO] Warm-up L2/L3 falhou ({exc}) — o primeiro alerta será mais lento.")
+    yield
+
+
 app = FastAPI(
     title="MESI SOCHAI API",
     description="Security Operations Center — API unificada",
     version="2.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -68,6 +93,18 @@ class AssetIn(BaseModel):
     criticality: str = "MEDIO"
     os_system: Optional[str] = None
     location: Optional[str] = None
+    description: Optional[str] = None
+    tags: Optional[List[str]] = []
+    services: Optional[List[Dict]] = []
+    config: Optional[Dict] = {}
+
+
+class AssetRelationIn(BaseModel):
+    target_asset_id: int
+    relation_type: str = "connected_to"
+    protocol: Optional[str] = None
+    port: Optional[int] = None
+    network_zone: Optional[str] = None
     description: Optional[str] = None
     tags: Optional[List[str]] = []
 
@@ -108,6 +145,15 @@ class ScenarioGenerateIn(BaseModel):
 
 class ScenarioRunIn(BaseModel):
     scenario_id: str
+
+
+class AssetScenarioRunIn(BaseModel):
+    """Cenário construído a partir das vulnerabilidades dos ativos reais."""
+    asset_ids: List[int] = []           # vazio = os ativos mais vulneráveis do inventário
+    max_incidents: int = 4
+    max_per_asset: int = 2
+    generate_playbooks: bool = True     # gerar playbook à medida (RAG + LLM) por vulnerabilidade
+    launch_phishing: bool = True
 
 
 # ================================================================== #
@@ -208,18 +254,70 @@ def _resolve_asset(alert_dict: Dict, db: Session) -> Optional[Asset]:
     return None
 
 
-def _ingest_alert(alert: AlertIn, db: Session) -> Dict:
+# Quantas missões de formação se geram ao mesmo tempo. Cada uma é uma chamada
+# LLM independente e limitada por I/O; 8 em paralelo mantêm um cenário de 12
+# incidentes em duas vagas sem atropelar o rate limit da API do modelo.
+_MISSION_WORKERS = 8
+
+
+def _resolve_pending_missions(pending: List[Dict]) -> List[Dict]:
+    """
+    Gera as missões de formação que ficaram pendentes de um ou mais incidentes.
+
+    Gera **uma** missão por incidente, mesmo quando o ativo afetado tem vários
+    donos — os restantes recebem uma cópia com o seu nome, sem custo adicional de
+    LLM — e delega o lote em generate_from_incidents, que as gera em paralelo.
+    """
+    if not pending:
+        return []
+
+    by_incident: Dict[str, List[Dict]] = {}
+    for item in pending:
+        by_incident.setdefault(item["payload"]["incident_id"], []).append(item)
+
+    groups = list(by_incident.values())
+    missions = gamification_engine.generate_from_incidents(
+        [group[0]["payload"] for group in groups], max_workers=_MISSION_WORKERS
+    )
+
+    out: List[Dict] = []
+    for group, base in zip(groups, missions):
+        for i, item in enumerate(group):
+            if i == 0:
+                mission = base
+            else:
+                # Cópia para o segundo dono do mesmo ativo: mesmo conteúdo,
+                # identificador próprio, nenhuma chamada adicional ao modelo.
+                mission = gamification_engine.add_scenario(
+                    {k: v for k, v in base.items() if k != "id"}
+                )
+            mission["target_user_id"] = item.get("target_user_id")
+            mission["target_username"] = item.get("target_username")
+            mission["asset_id"] = item.get("asset_id")
+            mission["asset_name"] = item.get("asset_name")
+            if item.get("owner_entry") is not None:
+                item["owner_entry"]["mission_id"] = mission["id"]
+            out.append(mission)
+    return out
+
+
+def _ingest_alert(alert: AlertIn, db: Session, defer_missions: bool = False) -> Dict:
     """
     Ingest an alert and run the full pipeline:
     L2 ML detection → L3 Playbook → L4 XAI/HITL → L6 SOAR.
     Shared by /api/alerts and the scenario orchestrator (/api/scenarios/run).
+
+    Com `defer_missions`, a geração das missões de formação (a única parte lenta
+    do pipeline, por ser uma chamada LLM) não é feita aqui: sai em
+    `_pending_missions` para quem chama a resolver de uma vez — em paralelo, ou
+    em background — em vez de a somar incidente a incidente.
     """
     incident_id = f"INC-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
     alert_dict = alert.model_dump()
     asset = _resolve_asset(alert_dict, db)
 
     # L2 — ML detection
-    ml_score, is_anomaly, ml_explanation = ml_detector.detect(alert_dict)
+    ml_score, is_anomaly, ml_explanation = get_ml_detector().detect(alert_dict)
 
     # L4 — XAI explanation
     xai_report = xai_explainer.explain(alert_dict, ml_explanation)
@@ -255,7 +353,56 @@ def _ingest_alert(alert: AlertIn, db: Session) -> Dict:
     db.commit()
     db.refresh(inc)
 
-    return {
+    # Reflete o incidente nos colaboradores associados ao ativo afetado:
+    # sobe-lhes o risk score (sofreram um incidente de segurança real) e
+    # gera uma missão de formação orientada a este incidente concreto —
+    # é assim que um ativo fica "integrado" no SOC, e não apenas listado.
+    affected_users: List[Dict] = []
+    pending_missions: List[Dict] = []
+    mission_payload = {
+        "incident_id": incident_id,
+        "type": alert.type,
+        "severity": alert.severity,
+        "description": alert.description,
+    }
+    if asset:
+        owners = db.query(User).filter(User.asset_id == asset.id).all()
+        for owner in owners:
+            old_risk = owner.risk_score or 50.0
+            owner.risk_score = GamificationEngine.update_risk_score(
+                old_risk,
+                owner.missions_completed or 0,
+                0.0,
+                True,
+            )
+            _log_risk_event(
+                db, owner, "security_incident", incident_id, alert.severity, None, old_risk
+            )
+            entry = {
+                "user_id": owner.id,
+                "username": owner.username,
+                "full_name": owner.full_name,
+                "new_risk_score": owner.risk_score,
+                "mission_id": None,
+            }
+            affected_users.append(entry)
+            pending_missions.append({
+                "payload": mission_payload,
+                "owner_entry": entry,
+                "target_user_id": owner.id,
+                "target_username": owner.username,
+                "asset_id": asset.id,
+                "asset_name": asset.name,
+            })
+        if owners:
+            db.commit()
+
+    # O risco humano e o registo do evento são trabalho de base de dados e ficam
+    # sempre feitos aqui; só a geração da missão é que pode ser diferida.
+    if not defer_missions:
+        _resolve_pending_missions(pending_missions)
+
+    out = {
         "incident_id": incident_id,
         "ml_score": round(ml_score, 4),
         "is_anomaly": is_anomaly,
@@ -269,17 +416,35 @@ def _ingest_alert(alert: AlertIn, db: Session) -> Dict:
         "hitl_required": xai_report.get("requires_hitl", False),
         "xai_report": xai_report,
         "ml_explanation": ml_explanation,
+        "affected_users": affected_users,
     }
+    if defer_missions:
+        out["_pending_missions"] = pending_missions
+        out["missions_pending"] = len(pending_missions)
+    return out
 
 
 @app.post("/api/alerts", tags=["Alertas"])
-def submit_alert(alert: AlertIn, db: Session = Depends(get_db)):
+def submit_alert(
+    alert: AlertIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     """
     Ingest an alert and run the full pipeline:
     L2 ML detection → L3 Playbook → L4 XAI/HITL → L6 SOAR.
     LLM agents (L3 triage) are optional (run_llm_pipeline=True).
+
+    A missão de formação dos donos do ativo afetado é gerada depois da resposta:
+    é uma chamada LLM de alguns segundos que nada acrescenta ao resultado do
+    pipeline, e assim o analista vê a triagem de imediato — a missão aparece na
+    Gamificação quando estiver pronta.
     """
-    return _ingest_alert(alert, db)
+    result = _ingest_alert(alert, db, defer_missions=True)
+    pending = result.pop("_pending_missions", [])
+    if pending:
+        background_tasks.add_task(_resolve_pending_missions, pending)
+    return result
 
 
 @app.get("/api/incidents", tags=["Incidentes"])
@@ -357,6 +522,44 @@ _SCENARIO_PHISHING_TEMPLATE = {
 }
 
 
+def _launch_scenario_phishing(db: Session, tpl_key: str, incident_id: str) -> Dict:
+    """
+    Lança uma campanha de simulação de phishing inspirada num incidente do cenário,
+    dirigida a todos os colaboradores. Partilhada pelos dois orquestradores de
+    cenários (catálogo e ativos reais).
+    """
+    tpl = gamification_engine.get_sim_templates()[tpl_key]
+    campaign_id = f"CMP-{datetime.now().strftime('%Y%m%d%H%M%S')}-{str(uuid.uuid4())[:6]}"
+    campaign = PhishingCampaign(
+        campaign_id=campaign_id,
+        name=f"{tpl['name']} (baseada em {incident_id})",
+        template_type=tpl_key,
+        difficulty=tpl["difficulty"],
+        sender=tpl["sender"],
+        subject=tpl["subject"],
+        lure_url=tpl["lure_url"],
+        teachable_moment=tpl["teachable_moment"],
+        based_on_incident=incident_id,
+        status="active",
+    )
+    db.add(campaign)
+    db.flush()
+    employees = db.query(User).filter(User.role == "employee").all()
+    for u in employees:
+        db.add(PhishingTarget(
+            campaign_id=campaign.id, user_id=u.id,
+            username=u.username, department=u.department, outcome="pending",
+        ))
+    db.commit()
+    return {
+        "campaign_id": campaign_id,
+        "name": campaign.name,
+        "template_type": tpl_key,
+        "targets": len(employees),
+        "based_on_incident": incident_id,
+    }
+
+
 def _scenario_summary(scn: Dict) -> Dict:
     incidents = [CENARIOS[i] for i in scn["incident_indices"]]
     return {
@@ -389,6 +592,7 @@ def run_attack_scenario(req: ScenarioRunIn, db: Session = Depends(get_db)):
     incidents_out: List[Dict] = []
     playbooks_out: Dict[str, Dict] = {}
     missions_out: List[Dict] = []
+    pending_missions: List[Dict] = []
     phishing_campaign_out: Optional[Dict] = None
 
     for idx in scn["incident_indices"]:
@@ -402,7 +606,8 @@ def run_attack_scenario(req: ScenarioRunIn, db: Session = Depends(get_db)):
             hash=tmpl.get("hash"),
             port=tmpl.get("port"),
         )
-        result = _ingest_alert(alert, db)
+        result = _ingest_alert(alert, db, defer_missions=True)
+        incident_pending = result.pop("_pending_missions", [])
 
         # Substituir o match TF-IDF genérico pelo playbook curado deste cenário
         # (os 14 playbooks seeded cobrem os 12 tipos de ameaça; a RAG library
@@ -435,48 +640,36 @@ def run_attack_scenario(req: ScenarioRunIn, db: Session = Depends(get_db)):
             "asset_criticality": result.get("asset_criticality"),
         })
 
-        # Gamificação: uma missão de formação gerada a partir deste incidente
-        mission = gamification_engine.generate_from_incident({
-            "incident_id": result["incident_id"],
-            "type": tmpl["type"],
-            "severity": tmpl["severity"],
-            "description": tmpl["description"],
-        })
-        missions_out.append(mission)
+        # L5 — uma única missão de formação por incidente. Quando o ativo
+        # afetado tem dono, é a missão dirigida que o pipeline já pediu; quando
+        # não tem, gera-se uma missão aberta. Antes pediam-se as duas, o que
+        # duplicava a chamada LLM de cada incidente do cenário.
+        if incident_pending:
+            pending_missions.extend(incident_pending)
+        else:
+            pending_missions.append({
+                "payload": {
+                    "incident_id": result["incident_id"],
+                    "type": tmpl["type"],
+                    "severity": tmpl["severity"],
+                    "description": tmpl["description"],
+                },
+                "owner_entry": None,
+                "target_user_id": None,
+                "target_username": None,
+                "asset_id": result.get("asset_id"),
+                "asset_name": result.get("asset_name"),
+            })
 
         # Sugerir/lançar uma campanha de phishing (no máximo uma por cenário)
         if phishing_campaign_out is None and tmpl["type"] in _SCENARIO_PHISHING_TEMPLATE:
-            tpl_key = _SCENARIO_PHISHING_TEMPLATE[tmpl["type"]]
-            tpl = gamification_engine.get_sim_templates()[tpl_key]
-            campaign_id = f"CMP-{datetime.now().strftime('%Y%m%d%H%M%S')}-{str(uuid.uuid4())[:6]}"
-            campaign = PhishingCampaign(
-                campaign_id=campaign_id,
-                name=f"{tpl['name']} (baseada em {result['incident_id']})",
-                template_type=tpl_key,
-                difficulty=tpl["difficulty"],
-                sender=tpl["sender"],
-                subject=tpl["subject"],
-                lure_url=tpl["lure_url"],
-                teachable_moment=tpl["teachable_moment"],
-                based_on_incident=result["incident_id"],
-                status="active",
+            phishing_campaign_out = _launch_scenario_phishing(
+                db, _SCENARIO_PHISHING_TEMPLATE[tmpl["type"]], result["incident_id"]
             )
-            db.add(campaign)
-            db.flush()
-            employees = db.query(User).filter(User.role == "employee").all()
-            for u in employees:
-                db.add(PhishingTarget(
-                    campaign_id=campaign.id, user_id=u.id,
-                    username=u.username, department=u.department, outcome="pending",
-                ))
-            db.commit()
-            phishing_campaign_out = {
-                "campaign_id": campaign_id,
-                "name": campaign.name,
-                "template_type": tpl_key,
-                "targets": len(employees),
-                "based_on_incident": result["incident_id"],
-            }
+
+    # Todas as missões do cenário numa só vaga de chamadas concorrentes, em vez
+    # de uma espera por incidente somada ao longo do ciclo acima.
+    missions_out = _resolve_pending_missions(pending_missions)
 
     return {
         "scenario_id": scn["id"],
@@ -484,6 +677,252 @@ def run_attack_scenario(req: ScenarioRunIn, db: Session = Depends(get_db)):
         "incidents": incidents_out,
         "playbooks": list(playbooks_out.values()),
         "training_missions": missions_out,
+        "phishing_campaign": phishing_campaign_out,
+    }
+
+
+# ================================================================== #
+# Asset-driven scenarios — vulnerabilidades reais → incidentes →
+# playbooks → gamificação
+# ================================================================== #
+
+def _resolve_scenario_playbook(
+    db: Session,
+    profile: Dict,
+    vuln: Dict,
+    incident_id: str,
+    generate: bool,
+) -> Dict:
+    """
+    Devolve o playbook de resposta para uma vulnerabilidade concreta.
+
+    Com `generate`, pede ao motor L3 (RAG + LLM) um playbook à medida do ativo e
+    da falha explorada, e persiste-o. Sem LLM disponível — ou se a geração
+    falhar — cai no playbook curado da biblioteca para aquele tipo de ameaça.
+    """
+    threat_type = vuln["threat_type"]
+
+    if generate and config.llm_available():
+        pb_data = playbook_engine.generate(
+            vuln["attack"],
+            threat_type,
+            vuln["severity"],
+            asset_threat_model.asset_context(profile, vuln),
+        )
+        if pb_data.get("generated"):
+            playbook_id = pb_data.get("id") or f"PB-GEN-{uuid.uuid4().hex[:8].upper()}"
+            pb_row = Playbook(
+                playbook_id=playbook_id,
+                name=pb_data.get("name", f"Resposta — {vuln['title']}"),
+                threat_type=threat_type,
+                severity_level=vuln["severity"],
+                steps=pb_data.get("steps", []),
+                priority_actions=pb_data.get("priority_actions", []),
+                tags=[vuln["id"], profile["asset_name"]],
+                is_generated=True,
+                source_incident=incident_id,
+                usage_count=1,
+            )
+            db.add(pb_row)
+            db.commit()
+            db.refresh(pb_row)
+            out = _playbook_to_dict(pb_row)
+            out["estimated_time"] = pb_data.get("estimated_time")
+            out["escalation_criteria"] = pb_data.get("escalation_criteria")
+            return out
+
+    # Playbook curado da biblioteca para este tipo de ameaça.
+    pb_row = (
+        db.query(Playbook)
+        .filter(Playbook.is_active == True, Playbook.threat_type == threat_type)
+        .order_by(Playbook.is_generated, Playbook.id)
+        .first()
+    )
+    if pb_row:
+        pb_row.usage_count = (pb_row.usage_count or 0) + 1
+        db.commit()
+        return _playbook_to_dict(pb_row)
+
+    return {"playbook_id": None, "name": f"Sem playbook para «{threat_type}»", "steps": []}
+
+
+@app.get("/api/scenarios/asset-risks", tags=["Cenários"])
+def asset_risk_scan(
+    asset_ids: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Analisa o inventário real de ativos e devolve, por ativo, as vulnerabilidades
+    deduzidas dos serviços expostos e da configuração de segurança registada.
+    É a base do cenário gerado a partir dos ativos.
+    """
+    q = db.query(Asset).filter(Asset.is_active == True)
+    if asset_ids:
+        wanted = [int(x) for x in asset_ids.split(",") if x.strip().isdigit()]
+        if wanted:
+            q = q.filter(Asset.id.in_(wanted))
+
+    assets = [_asset_to_dict(a) for a in q.all()]
+    profiles = asset_threat_model.rank_profiles(
+        [asset_threat_model.risk_profile(a) for a in assets]
+    )
+    vulnerable = [p for p in profiles if p["vulnerability_count"]]
+    all_vulns = [v for p in vulnerable for v in p["vulnerabilities"]]
+
+    return {
+        "summary": {
+            "assets_scanned": len(profiles),
+            "assets_at_risk": len(vulnerable),
+            "vulnerabilities_found": len(all_vulns),
+            "critical_findings": sum(1 for v in all_vulns if v["severity"] == "CRITICA"),
+            "threat_types": sorted({v["threat_type"] for v in all_vulns}),
+            "avg_risk_score": (
+                round(sum(p["risk_score"] for p in profiles) / len(profiles), 1)
+                if profiles else 0.0
+            ),
+        },
+        "assets": profiles,
+    }
+
+
+@app.post("/api/scenarios/from-assets", tags=["Cenários"])
+def run_asset_scenario(req: AssetScenarioRunIn, db: Session = Depends(get_db)):
+    """
+    Gera um cenário/incidente a partir dos ativos que já existem no dashboard.
+
+    Para cada vulnerabilidade encontrada no inventário cria o alerta realista que
+    a sua exploração produziria, passa-o pelo pipeline L1→L6, gera o playbook de
+    resposta correspondente e, em consequência, a missão de formação e o impacto
+    no risco humano dos colaboradores donos do ativo afetado.
+    """
+    q = db.query(Asset).filter(Asset.is_active == True)
+    if req.asset_ids:
+        q = q.filter(Asset.id.in_(req.asset_ids))
+    assets = [_asset_to_dict(a) for a in q.all()]
+    if not assets:
+        raise HTTPException(404, "Nenhum ativo ativo encontrado para analisar")
+
+    profiles = asset_threat_model.rank_profiles(
+        [asset_threat_model.risk_profile(a) for a in assets]
+    )
+    path = asset_threat_model.select_attack_path(
+        profiles, max(1, req.max_incidents), max(1, req.max_per_asset)
+    )
+    if not path:
+        raise HTTPException(
+            400,
+            "Os ativos selecionados não apresentam vulnerabilidades — "
+            "não há cenário para gerar. Escolha outros ativos ou registe "
+            "serviços/configuração de segurança no inventário.",
+        )
+
+    incidents_out: List[Dict] = []
+    playbooks_out: Dict[str, Dict] = {}
+    missions_out: List[Dict] = []
+    affected_users: Dict[int, Dict] = {}
+    phishing_campaign_out: Optional[Dict] = None
+    scenario_id = f"ASSET-SCN-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+    for step in path:
+        profile, vuln = step["profile"], step["vulnerability"]
+
+        # L1 → L6: o alerta entra pelo mesmo pipeline dos alertas reais e já
+        # traz o asset_id, pelo que arrasta o dono do ativo para a camada L5.
+        result = _ingest_alert(AlertIn(**asset_threat_model.build_alert(profile, vuln)), db)
+        incident_id = result["incident_id"]
+
+        # L3 — playbook para esta vulnerabilidade concreta.
+        pb = _resolve_scenario_playbook(db, profile, vuln, incident_id, req.generate_playbooks)
+        if pb.get("playbook_id"):
+            inc_row = db.query(Incident).filter(Incident.incident_id == incident_id).first()
+            inc_row.playbook_id = pb["playbook_id"]
+            db.commit()
+            result["playbook_id"] = pb["playbook_id"]
+            entry = playbooks_out.setdefault(pb["playbook_id"], {**pb, "vulnerabilities": []})
+            entry["vulnerabilities"].append({
+                "title": vuln["title"],
+                "asset_name": profile["asset_name"],
+                "evidence": vuln["evidence"],
+                "remediation": vuln["remediation"],
+            })
+
+        incidents_out.append({
+            "incident_id": incident_id,
+            "type": vuln["threat_type"],
+            "severity": vuln["severity"],
+            "ml_score": result["ml_score"],
+            "hitl_required": result["hitl_required"],
+            "playbook_id": result["playbook_id"],
+            "asset_id": profile["asset_id"],
+            "asset_name": profile["asset_name"],
+            "asset_criticality": profile["criticality"],
+            "vulnerability": vuln["title"],
+            "vulnerability_id": vuln["id"],
+            "evidence": vuln["evidence"],
+            "remediation": vuln["remediation"],
+            "description": vuln["attack"],
+        })
+
+        # L5 — gamificação. O pipeline já gerou uma missão dirigida a cada dono
+        # do ativo; se o ativo não tiver dono registado, gera-se uma missão
+        # aberta para que a fragilidade seja na mesma trabalhada em formação.
+        incident_missions = [
+            gamification_engine.get_scenario(u["mission_id"])
+            for u in result.get("affected_users", [])
+        ]
+        incident_missions = [m for m in incident_missions if m]
+        if not incident_missions:
+            mission = gamification_engine.generate_from_incident({
+                "incident_id": incident_id,
+                "type": vuln["threat_type"],
+                "severity": vuln["severity"],
+                "description": vuln["attack"],
+            })
+            mission["asset_id"] = profile["asset_id"]
+            mission["asset_name"] = profile["asset_name"]
+            incident_missions = [mission]
+
+        for mission in incident_missions:
+            mission["vulnerability"] = vuln["title"]
+            missions_out.append(mission)
+
+        for u in result.get("affected_users", []):
+            affected_users[u["user_id"]] = {
+                **u,
+                "asset_name": profile["asset_name"],
+                "vulnerability": vuln["title"],
+            }
+
+        # Simulação de phishing quando a fragilidade é do domínio humano.
+        if (
+            req.launch_phishing
+            and phishing_campaign_out is None
+            and vuln["threat_type"] in asset_threat_model.PHISHING_TRIGGER_TYPES
+        ):
+            phishing_campaign_out = _launch_scenario_phishing(
+                db,
+                asset_threat_model.PHISHING_TRIGGER_TYPES[vuln["threat_type"]],
+                incident_id,
+            )
+
+    affected_assets = sorted({i["asset_name"] for i in incidents_out})
+    return {
+        "scenario_id": scenario_id,
+        "scenario_name": (
+            f"Exploração de vulnerabilidades em {len(affected_assets)} ativo(s) do inventário"
+        ),
+        "generated_at": datetime.now().isoformat(),
+        "assets_scanned": len(profiles),
+        "assets_affected": affected_assets,
+        "vulnerabilities_found": sum(p["vulnerability_count"] for p in profiles),
+        "playbooks_generated_by_ai": sum(
+            1 for pb in playbooks_out.values() if pb.get("is_generated")
+        ),
+        "llm_available": config.llm_available(),
+        "incidents": incidents_out,
+        "playbooks": list(playbooks_out.values()),
+        "training_missions": missions_out,
+        "affected_users": list(affected_users.values()),
         "phishing_campaign": phishing_campaign_out,
     }
 
@@ -584,6 +1023,11 @@ def retrieve_playbook(query: str, top_k: int = 2):
 # Assets
 # ================================================================== #
 
+_ASSET_RELATION_TYPES = {
+    "connected_to", "depends_on", "protects", "routes_to", "hosted_on",
+    "connected_via", "communicates_with", "other",
+}
+
 @app.get("/api/assets", tags=["Ativos"])
 def list_assets(
     department: Optional[str] = None,
@@ -608,6 +1052,107 @@ def create_asset(asset: AssetIn, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(a)
     return _asset_to_dict(a)
+
+
+@app.get("/api/assets/{asset_id}/relations", tags=["Ativos"])
+def asset_relations(asset_id: int, db: Session = Depends(get_db)):
+    """Lista as ligações de rede de um activo, nos sentidos de origem e destino."""
+    asset = db.query(Asset).filter(Asset.id == asset_id, Asset.is_active == True).first()
+    if not asset:
+        raise HTTPException(404, "Ativo não encontrado")
+    relations = (
+        db.query(AssetRelation)
+        .filter(
+            AssetRelation.is_active == True,
+            (AssetRelation.source_asset_id == asset_id)
+            | (AssetRelation.target_asset_id == asset_id),
+        )
+        .order_by(AssetRelation.created_at.desc())
+        .all()
+    )
+    return [_asset_relation_to_dict(r) for r in relations]
+
+
+@app.post("/api/assets/{asset_id}/relations", tags=["Ativos"])
+def create_asset_relation(
+    asset_id: int,
+    relation: AssetRelationIn,
+    db: Session = Depends(get_db),
+):
+    """Cria uma ligação dirigida entre dois activos activos da rede local."""
+    source = db.query(Asset).filter(Asset.id == asset_id, Asset.is_active == True).first()
+    target = db.query(Asset).filter(
+        Asset.id == relation.target_asset_id, Asset.is_active == True
+    ).first()
+    if not source or not target:
+        raise HTTPException(404, "Ativo de origem ou destino não encontrado")
+    if asset_id == relation.target_asset_id:
+        raise HTTPException(400, "Um ativo não pode relacionar-se consigo próprio")
+
+    relation_type = relation.relation_type.strip().lower()
+    if relation_type not in _ASSET_RELATION_TYPES:
+        raise HTTPException(
+            400,
+            f"Tipo de relação inválido. Use: {', '.join(sorted(_ASSET_RELATION_TYPES))}",
+        )
+
+    existing = db.query(AssetRelation).filter(
+        AssetRelation.source_asset_id == asset_id,
+        AssetRelation.target_asset_id == relation.target_asset_id,
+        AssetRelation.relation_type == relation_type,
+        AssetRelation.is_active == True,
+    ).first()
+    if existing:
+        raise HTTPException(409, "Esta relação entre os ativos já existe")
+
+    asset_relation = AssetRelation(
+        source_asset_id=asset_id,
+        target_asset_id=relation.target_asset_id,
+        relation_type=relation_type,
+        protocol=relation.protocol,
+        port=relation.port,
+        network_zone=relation.network_zone,
+        description=relation.description,
+        tags=relation.tags or [],
+    )
+    db.add(asset_relation)
+    db.commit()
+    db.refresh(asset_relation)
+    return _asset_relation_to_dict(asset_relation)
+
+
+@app.delete("/api/asset-relations/{relation_id}", tags=["Ativos"])
+def delete_asset_relation(relation_id: int, db: Session = Depends(get_db)):
+    relation = db.query(AssetRelation).filter(
+        AssetRelation.id == relation_id, AssetRelation.is_active == True
+    ).first()
+    if not relation:
+        raise HTTPException(404, "Relação não encontrada")
+    relation.is_active = False
+    db.commit()
+    return {"deleted": relation_id}
+
+
+@app.get("/api/network/topology", tags=["Ativos"])
+def network_topology(asset_id: Optional[int] = None, db: Session = Depends(get_db)):
+    """Devolve os nós e arestas activos para uma visão de topologia da rede."""
+    assets_query = db.query(Asset).filter(Asset.is_active == True)
+    if asset_id is not None:
+        selected = db.query(Asset).filter(Asset.id == asset_id, Asset.is_active == True).first()
+        if not selected:
+            raise HTTPException(404, "Ativo não encontrado")
+        assets_query = assets_query.filter(Asset.id == asset_id)
+    assets = assets_query.order_by(Asset.name).all()
+    asset_ids = {asset.id for asset in assets}
+    relations = db.query(AssetRelation).filter(AssetRelation.is_active == True).all()
+    relations = [
+        relation for relation in relations
+        if relation.source_asset_id in asset_ids and relation.target_asset_id in asset_ids
+    ] if asset_id is not None else relations
+    return {
+        "nodes": [_asset_to_dict(asset) for asset in assets],
+        "edges": [_asset_relation_to_dict(relation) for relation in relations],
+    }
 
 
 @app.get("/api/assets/{asset_id}/incidents", tags=["Ativos"])
@@ -1189,6 +1734,93 @@ def soar_summary():
 # Analytics
 # ================================================================== #
 
+# Alvo de SLA por severidade (minutos). São os mesmos limiares que o L4
+# aplica à revisão HITL, aqui reutilizados para o ciclo completo do
+# incidente (entrada do alerta → resolução).
+_SLA_TARGET_MIN = {
+    "CRITICA": config.HITL_SLA_CRITICAL,
+    "ALTA": config.HITL_SLA_HIGH,
+    "MEDIA": config.HITL_SLA_NORMAL,
+    "BAIXA": config.HITL_SLA_NORMAL,
+}
+
+
+def _minutes_between(start, end) -> Optional[float]:
+    """Minutos entre dois instantes; None se faltar um deles ou se for negativo."""
+    if not start or not end:
+        return None
+    delta = (end - start).total_seconds() / 60
+    return delta if delta >= 0 else None
+
+
+def _mean(values: List[float]) -> Optional[float]:
+    return round(sum(values) / len(values), 1) if values else None
+
+
+def _compute_kpis(db: Session) -> Dict:
+    """
+    KPIs de desempenho do SOC — eficiência de deteção/resposta e precisão
+    dos alertas. Tudo derivado dos timestamps já persistidos no incidente:
+    created_at (entrada do alerta), reviewed_at (triagem HITL) e
+    resolved_at (fecho).
+    """
+    incidents = db.query(Incident).all()
+
+    time_to_investigate: List[float] = []
+    time_to_resolve: List[float] = []
+    resolve_by_sev: Dict[str, List[float]] = {}
+    sla_met = 0
+    sla_sample = 0
+
+    for inc in incidents:
+        sev = (inc.severity or "MEDIA").upper()
+
+        t_inv = _minutes_between(inc.created_at, inc.reviewed_at)
+        if t_inv is not None:
+            time_to_investigate.append(t_inv)
+
+        t_res = _minutes_between(inc.created_at, inc.resolved_at)
+        if t_res is not None:
+            time_to_resolve.append(t_res)
+            resolve_by_sev.setdefault(sev, []).append(t_res)
+            sla_sample += 1
+            if t_res <= _SLA_TARGET_MIN.get(sev, config.HITL_SLA_NORMAL):
+                sla_met += 1
+
+    true_pos = sum(1 for i in incidents if i.is_true_positive is True)
+    false_pos = sum(1 for i in incidents if i.is_true_positive is False)
+    triaged = true_pos + false_pos
+
+    return {
+        # MTTD exigiria a hora a que o evento ocorreu na origem. A ingestão
+        # só regista a hora a que o alerta entrou no pipeline, pelo que a
+        # métrica fica por instrumentar em vez de ser estimada.
+        "mttd_minutes": None,
+        "mttd_note": "requer hora do evento na origem (não instrumentado na ingestão)",
+        "mtti_minutes": _mean(time_to_investigate),
+        "mttr_minutes": _mean(time_to_resolve),
+        "mttr_by_severity": {s: _mean(v) for s, v in resolve_by_sev.items()},
+        "sla_targets_minutes": _SLA_TARGET_MIN,
+        "sla_compliance_pct": round(sla_met / sla_sample * 100, 1) if sla_sample else None,
+        "sla_sample": sla_sample,
+        "false_positive_rate_pct": round(false_pos / triaged * 100, 1) if triaged else None,
+        "true_positive_rate_pct": round(true_pos / triaged * 100, 1) if triaged else None,
+        "triaged_count": triaged,
+        "alerts_per_confirmed_incident": (
+            round(len(incidents) / true_pos, 1) if true_pos else None
+        ),
+        "total_alerts": len(incidents),
+        "investigated_count": len(time_to_investigate),
+        "resolved_count": len(time_to_resolve),
+    }
+
+
+@app.get("/api/analytics/kpis", tags=["Analytics"])
+def analytics_kpis(db: Session = Depends(get_db)):
+    """MTTI, MTTR, cumprimento de SLA e precisão dos alertas."""
+    return _compute_kpis(db)
+
+
 @app.get("/api/analytics/overview", tags=["Analytics"])
 def analytics_overview(db: Session = Depends(get_db)):
     total = db.query(Incident).count()
@@ -1228,6 +1860,7 @@ def analytics_overview(db: Session = Depends(get_db)):
         },
         "hitl": hitl_manager.stats(),
         "soar": soar_executor.summary(),
+        "kpis": _compute_kpis(db),
     }
 
 
@@ -1246,6 +1879,11 @@ def _incident_to_dict(inc: Incident) -> Dict:
         "asset_id": inc.asset_id,
         "asset_name": inc.asset.name if inc.asset else None,
         "asset_criticality": inc.asset.criticality if inc.asset else None,
+        "asset_owners": (
+            [{"user_id": u.id, "username": u.username, "full_name": u.full_name}
+             for u in inc.asset.users]
+            if inc.asset else []
+        ),
         "is_true_positive": inc.is_true_positive,
         "ml_score": inc.ml_score,
         "playbook_id": inc.playbook_id,
@@ -1274,8 +1912,32 @@ def _asset_to_dict(a: Asset) -> Dict:
         "location": a.location,
         "description": a.description,
         "tags": a.tags or [],
+        "services": a.services or [],
+        "config": a.config or {},
         "is_active": a.is_active,
         "created_at": a.created_at.isoformat() if a.created_at else None,
+        "linked_users": [
+            {"user_id": u.id, "username": u.username, "full_name": u.full_name}
+            for u in a.users
+        ],
+    }
+
+
+def _asset_relation_to_dict(relation: AssetRelation) -> Dict:
+    return {
+        "id": relation.id,
+        "source_asset_id": relation.source_asset_id,
+        "source_asset_name": relation.source_asset.name if relation.source_asset else None,
+        "target_asset_id": relation.target_asset_id,
+        "target_asset_name": relation.target_asset.name if relation.target_asset else None,
+        "relation_type": relation.relation_type,
+        "protocol": relation.protocol,
+        "port": relation.port,
+        "network_zone": relation.network_zone,
+        "description": relation.description,
+        "tags": relation.tags or [],
+        "is_active": relation.is_active,
+        "created_at": relation.created_at.isoformat() if relation.created_at else None,
     }
 
 

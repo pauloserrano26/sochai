@@ -12,6 +12,8 @@ users_auth.json
 *.db
 *.sqlite
 *.sqlite3
+*.db.bak
+*.db.pre_*
 
 # Python
 __pycache__/
@@ -32,6 +34,14 @@ logs/
 # Relatórios gerados por simulações (regeneráveis, não são código-fonte)
 simulacao_treino_resultados.json
 simulacao_populacional_resultados.json
+analise_eficacia_resultados.json
+
+# Processos e perfis locais (arrancar.bat, automação de browser)
+*.pid
+_cprof*/
+
+# Estado da dashboard gravado por conta (ui_state.py) — local, por utilizador
+.state/
 
 # IDE
 .vscode/

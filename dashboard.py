@@ -14,8 +14,12 @@ import streamlit as st
 
 import auth
 import portal_colaborador
+import ui_state
 
-API_BASE = "http://localhost:8000"
+# 127.0.0.1 e não "localhost": nesta máquina "localhost" resolve primeiro para
+# ::1, e a API escuta em 0.0.0.0 (só IPv4), pelo que cada pedido esperava ~2 s
+# pelo timeout do IPv6 antes de tentar o IPv4. Medido: 2049 ms → 4 ms por pedido.
+API_BASE = "http://127.0.0.1:8000"
 
 st.set_page_config(
     page_title="SOCHAI Platform",
@@ -50,11 +54,33 @@ st.markdown("""
 # Helpers
 # ------------------------------------------------------------------ #
 
+@st.cache_data(ttl=6, show_spinner=False)
+def _cached_get(path: str, params: Optional[dict], timeout: int):
+    try:
+        resp = requests.get(f"{API_BASE}{path}", params=params, timeout=timeout)
+        if resp.status_code < 300:
+            return resp.json()
+        return {"error": resp.text}
+    except requests.exceptions.ConnectionError:
+        return {"error": "API offline — inicie: python api_main.py"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def api(method: str, path: str, **kwargs):
     timeout = kwargs.pop("timeout", 10)
+
+    # GET requests are read-only, so Streamlit's per-script rerun (every
+    # widget interaction reruns the whole file) can reuse a short-lived
+    # cached response instead of re-hitting the API every time.
+    if method == "get":
+        return _cached_get(path, kwargs.get("params"), timeout)
+
     try:
         resp = getattr(requests, method)(f"{API_BASE}{path}", timeout=timeout, **kwargs)
         if resp.status_code < 300:
+            # Mutation succeeded — drop cached GETs so the next read isn't stale.
+            _cached_get.clear()
             return resp.json()
         return {"error": resp.text}
     except requests.exceptions.ConnectionError:
@@ -88,6 +114,23 @@ def metric_card(label: str, value, color: str = "") -> str:
     )
 
 
+def fmt_minutes(value) -> str:
+    """Minutos → '—' | '42 min' | '3h 05m' | '2d 4h', para leitura rápida nos KPIs."""
+    if value is None:
+        return "—"
+    mins = float(value)
+    if mins < 90:
+        return f"{mins:.0f} min"
+    hours = mins / 60
+    if hours < 48:
+        return f"{int(hours)}h {int(mins % 60):02d}m"
+    return f"{int(hours // 24)}d {int(hours % 24)}h"
+
+
+def fmt_pct(value) -> str:
+    return "—" if value is None else f"{value:.1f}%"
+
+
 def api_online() -> bool:
     r = api("get", "/health")
     return isinstance(r, dict) and r.get("status") == "online"
@@ -98,6 +141,10 @@ def api_online() -> bool:
 # ------------------------------------------------------------------ #
 
 user = auth.require_login()
+
+# Repõe a vista gravada no fim da última utilização — tem de correr antes de
+# qualquer widget ser criado, senão o Streamlit já fixou os valores iniciais.
+ui_state.restore(user["username"])
 
 with st.sidebar:
     st.markdown("# 🛡️ MESI SOCHAI")
@@ -199,12 +246,53 @@ with st.sidebar:
     if st.button("🔄 Atualizar Dados", use_container_width=True):
         st.rerun()
 
+    # ---------------------------------------------------------------- #
+    # Estado da sessão entre arranques
+    # ---------------------------------------------------------------- #
+    st.divider()
+    st.caption("**Estado da sessão**")
+
+    _snap = ui_state.saved_at(user["username"])
+    if not _snap:
+        st.caption("Sem estado gravado para esta conta.")
+    elif ui_state.was_restored():
+        st.caption(f"↩️ Vista reposta do estado de {_snap[:16].replace('T', ' ')}")
+    else:
+        st.caption(f"💾 Último estado gravado: {_snap[:16].replace('T', ' ')}")
+
+    if st.button("💾 Guardar estado", use_container_width=True,
+                 help="Grava a tab ativa, os filtros e os últimos resultados de cenários "
+                      "e simulações, para os reencontrar no próximo arranque."):
+        ui_state.save(user["username"])
+        st.rerun()
+
+    if st.button("🚪 Guardar e encerrar", use_container_width=True,
+                 help="Grava o estado e desliga o servidor da dashboard."):
+        ui_state.save(user["username"])
+        st.session_state["_shutting_down"] = True
+        st.rerun()
+
+    if _snap and st.button("🧹 Esquecer estado gravado", use_container_width=True,
+                           help="Apaga o snapshot: o próximo arranque começa limpo."):
+        ui_state.clear(user["username"])
+        st.rerun()
+
+if st.session_state.get("_shutting_down"):
+    st.success(
+        f"💾 Estado gravado em `{ui_state.path_for(user['username'])}`.\n\n"
+        "A dashboard está a encerrar — pode fechar este separador. "
+        "No próximo `arrancar.bat` a vista é reposta a partir deste ponto."
+    )
+    st.caption("A API (porta 8000) continua a correr; feche a janela \"MESI API\" para a parar.")
+    ui_state.request_shutdown()
+    st.stop()
+
 
 # ------------------------------------------------------------------ #
 # Tabs
 # ------------------------------------------------------------------ #
 
-tabs = st.tabs([
+TAB_LABELS = [
     "🖥️ Ativos",
     "🚨 SOCHAI Operations",
     "📋 Playbooks",
@@ -213,7 +301,15 @@ tabs = st.tabs([
     "📊 Analytics",
     "🎬 Cenários",
     "📈 Resultados",
-])
+]
+
+# on_change="rerun" é o que faz o Streamlit expor a tab ativa em
+# st.session_state["main_tab"] — sem isso as tabs são puramente do lado do
+# cliente e não há forma de saber onde o utilizador estava para gravar.
+# keep_valid protege contra um snapshot antigo apontar para uma tab renomeada.
+ui_state.keep_valid(ui_state.TAB_WIDGET_KEY, TAB_LABELS)
+tabs = st.tabs(TAB_LABELS, key=ui_state.TAB_WIDGET_KEY, on_change="rerun")
+ui_state.track_active_tab(TAB_LABELS[0])
 
 
 # ================================================================== #
@@ -291,6 +387,18 @@ with tabs[1]:
                     )
                     st.write(f"**Ação Recomendada:** {result.get('recommended_action', '—')}")
                     st.write(f"**Ações SOAR Executadas:** {result.get('soar_actions_executed', 0)}")
+
+                    affected = result.get("affected_users") or []
+                    if affected:
+                        st.warning(
+                            "**🎯 Colaboradores refletidos por este incidente** "
+                            "(risk score atualizado + missão de formação gerada):"
+                        )
+                        for au in affected:
+                            st.write(
+                                f"- {au.get('full_name') or au.get('username')} "
+                                f"— novo Risk Score: **{au.get('new_risk_score')}**"
+                            )
 
                     with st.expander("🔍 Ver Análise XAI Detalhada"):
                         xai = result.get("xai_report", {})
@@ -405,7 +513,7 @@ with tabs[1]:
 with tabs[0]:
     st.header("🖥️ Gestão de Ativos da Empresa")
 
-    act_tabs = st.tabs(["📋 Lista de Ativos", "➕ Adicionar Ativo"])
+    act_tabs = st.tabs(["📋 Lista de Ativos", "🕸️ Topologia da Rede", "➕ Adicionar Ativo"])
 
     with act_tabs[0]:
         c1, c2, c3 = st.columns(3)
@@ -454,10 +562,108 @@ with tabs[0]:
                     cb.write(f"**Localização:** {a.get('location') or '—'}")
                     cc.write(f"**Responsável:** {a.get('owner') or '—'}")
                     cc.write(f"**Criticidade:** {icon} {crit}")
+                    linked = a.get("linked_users") or []
+                    cc.write(
+                        "**Colaborador associado (SOC):** "
+                        + (", ".join(u.get("full_name") or u["username"] for u in linked) or "—")
+                    )
                     if a.get("description"):
                         st.caption(a["description"])
                     if a.get("tags"):
                         st.write(" ".join(f"`{t}`" for t in a["tags"]))
+
+                    st.divider()
+                    services = a.get("services") or []
+                    cfg = a.get("config") or {}
+                    if services or cfg:
+                        st.write("**⚙️ Serviços e Configuração**")
+                        if services:
+                            for svc in services:
+                                port = svc.get("port")
+                                port_str = f":{port}" if port else ""
+                                exposed = " 🌐 exposto à internet" if svc.get("exposed") else ""
+                                ver = f" — {svc['version']}" if svc.get("version") else ""
+                                st.markdown(
+                                    f"- `{svc.get('name')}{port_str}/{svc.get('protocol')}`{ver}{exposed}"
+                                )
+                        if cfg:
+                            cf1, cf2, cf3 = st.columns(3)
+                            cf1.write(f"**Patch em dia:** {'✅' if cfg.get('os_patched') else '❌'}")
+                            cf1.write(f"**MFA:** {'✅' if cfg.get('mfa_enabled') else '❌'}")
+                            cf2.write(f"**AV/EDR:** {cfg.get('av_edr_agent') or '—'}")
+                            cf2.write(f"**Exposto à internet:** {'⚠️ Sim' if cfg.get('internet_facing') else 'Não'}")
+                            cf3.write(f"**Backups:** {'✅' if cfg.get('backup_enabled') else '❌'}")
+                            cf3.write(f"**Encriptação em repouso:** {'✅' if cfg.get('encryption_at_rest') else '❌'}")
+                            if cfg.get("known_weaknesses"):
+                                st.error(
+                                    "**⚠️ Fragilidades conhecidas:** "
+                                    + "; ".join(cfg["known_weaknesses"])
+                                )
+                        st.divider()
+
+                    st.write("**🔗 Relações na rede local**")
+                    asset_relations = api("get", f"/api/assets/{a['id']}/relations")
+                    if isinstance(asset_relations, list) and asset_relations:
+                        for rel in asset_relations:
+                            direction = (
+                                f"{rel.get('source_asset_name')} → {rel.get('target_asset_name')}"
+                            )
+                            details = ""
+                            if rel.get("protocol") or rel.get("port"):
+                                details = f" ({rel.get('protocol') or '—'}:{rel.get('port') or '—'})"
+                            st.markdown(
+                                f"- `{rel.get('relation_type')}` {direction}{details}"
+                            )
+                            if rel.get("description"):
+                                st.caption(rel["description"])
+                            if st.button("Remover relação", key=f"delrel_{a['id']}_{rel['id']}"):
+                                api("delete", f"/api/asset-relations/{rel['id']}")
+                                st.rerun()
+                    else:
+                        st.caption("Sem relações registadas.")
+
+                    other_assets = [other for other in assets if other["id"] != a["id"]]
+                    if other_assets:
+                        with st.form(f"relation_form_{a['id']}"):
+                            st.caption("Adicionar ligação a outro activo")
+                            target = st.selectbox(
+                                "Activo destino",
+                                other_assets,
+                                format_func=lambda item: (
+                                    f"{item['name']} — {item.get('ip_address') or 'sem IP'}"
+                                ),
+                            )
+                            rc1, rc2, rc3 = st.columns(3)
+                            relation_type = rc1.selectbox(
+                                "Relação",
+                                [
+                                    "connected_to", "depends_on", "protects", "routes_to",
+                                    "hosted_on", "connected_via", "communicates_with", "other",
+                                ],
+                            )
+                            protocol = rc2.text_input("Protocolo")
+                            port = rc3.number_input("Porta", min_value=0, max_value=65535, value=0)
+                            network_zone = st.text_input("Zona de rede", placeholder="LAN, DMZ, Wi-Fi...")
+                            relation_description = st.text_input("Descrição da ligação")
+                            save_relation = st.form_submit_button("🔗 Associar activos")
+                        if save_relation:
+                            result = api(
+                                "post",
+                                f"/api/assets/{a['id']}/relations",
+                                json={
+                                    "target_asset_id": target["id"],
+                                    "relation_type": relation_type,
+                                    "protocol": protocol or None,
+                                    "port": port or None,
+                                    "network_zone": network_zone or None,
+                                    "description": relation_description or None,
+                                },
+                            )
+                            if "error" in result:
+                                st.error(result["error"])
+                            else:
+                                st.success("Relação criada.")
+                                st.rerun()
 
                     st.divider()
                     asset_incs = api("get", f"/api/assets/{a['id']}/incidents")
@@ -481,6 +687,35 @@ with tabs[0]:
             st.info("Nenhum ativo encontrado. Adicione o primeiro ativo.")
 
     with act_tabs[1]:
+        st.subheader("Topologia da Rede Local")
+        topology = api("get", "/api/network/topology")
+        if isinstance(topology, dict) and "nodes" in topology:
+            nodes = topology["nodes"]
+            edges = topology.get("edges", [])
+            tc1, tc2 = st.columns(2)
+            tc1.metric("Nós activos", len(nodes))
+            tc2.metric("Relações activas", len(edges))
+            if edges:
+                st.write("**Ligações conhecidas**")
+                for edge in edges:
+                    extra = []
+                    if edge.get("protocol"):
+                        extra.append(edge["protocol"])
+                    if edge.get("port"):
+                        extra.append(f"porta {edge['port']}")
+                    if edge.get("network_zone"):
+                        extra.append(edge["network_zone"])
+                    suffix = f" — {', '.join(extra)}" if extra else ""
+                    st.markdown(
+                        f"`{edge['source_asset_name']}` **{edge['relation_type']}** "
+                        f"`{edge['target_asset_name']}`{suffix}"
+                    )
+            else:
+                st.info("Ainda não existem relações. Crie-as na lista de activos.")
+        elif isinstance(topology, dict) and "error" in topology:
+            st.error(topology["error"])
+
+    with act_tabs[2]:
         st.subheader("Adicionar Novo Ativo")
         with st.form("asset_form"):
             a_name = st.text_input("Nome do Ativo *")
@@ -1165,6 +1400,78 @@ with tabs[5]:
         </div>
         """, unsafe_allow_html=True)
 
+        # ---- KPIs de desempenho do SOC ----
+        kpis = ov.get("kpis") or {}
+        st.subheader("⏱️ KPIs de Desempenho do SOC")
+        st.caption(
+            "Eficiência de deteção e resposta, e precisão dos alertas — a base da "
+            "monitorização, medição e relato de serviço (ISO/IEC 20000, 9.1 e 9.4)"
+        )
+
+        sla_pct = kpis.get("sla_compliance_pct")
+        fp_rate = kpis.get("false_positive_rate_pct")
+        sla_color = (
+            "" if sla_pct is None
+            else "green" if sla_pct >= 90 else "yellow" if sla_pct >= 70 else "red"
+        )
+        fp_color = (
+            "" if fp_rate is None
+            else "green" if fp_rate <= 20 else "yellow" if fp_rate <= 40 else "red"
+        )
+
+        kpi_rows = [
+            [
+                ("MTTD", fmt_minutes(kpis.get("mttd_minutes")), "",
+                 kpis.get("mttd_note", "por instrumentar")),
+                ("MTTI", fmt_minutes(kpis.get("mtti_minutes")), "",
+                 f"até à triagem · {kpis.get('investigated_count', 0)} incidente(s)"),
+                ("MTTR", fmt_minutes(kpis.get("mttr_minutes")), "",
+                 f"até à resolução · {kpis.get('resolved_count', 0)} incidente(s)"),
+                ("Dentro do SLA", fmt_pct(sla_pct), sla_color,
+                 f"{kpis.get('sla_sample', 0)} incidente(s) resolvido(s)"),
+            ],
+            [
+                ("Falsos Positivos", fmt_pct(fp_rate), fp_color,
+                 "dos alertas classificados na triagem"),
+                ("Precisão (VP)", fmt_pct(kpis.get("true_positive_rate_pct")), "",
+                 "alertas confirmados como ameaça real"),
+                ("Alertas / Confirmado",
+                 kpis.get("alerts_per_confirmed_incident") or "—", "",
+                 "esforço de triagem por ameaça real"),
+                ("Alertas Classificados", kpis.get("triaged_count", 0), "",
+                 f"de {kpis.get('total_alerts', 0)} alertas recebidos"),
+            ],
+        ]
+        for row in kpi_rows:
+            cols = st.columns(4)
+            for col, (lbl, val, clr, note) in zip(cols, row):
+                col.markdown(metric_card(lbl, val, clr), unsafe_allow_html=True)
+                col.caption(note)
+
+        mttr_sev = kpis.get("mttr_by_severity") or {}
+        sla_targets = kpis.get("sla_targets_minutes") or {}
+        if mttr_sev:
+            st.markdown("**MTTR por severidade vs. alvo de SLA**")
+            for sev in ("CRITICA", "ALTA", "MEDIA", "BAIXA"):
+                actual = mttr_sev.get(sev)
+                if actual is None:
+                    continue
+                target = sla_targets.get(sev)
+                within = target is not None and actual <= target
+                sc = st.columns([2, 2, 2, 1])
+                sc[0].markdown(f"{sev_icon(sev)} **{sev}**")
+                sc[1].markdown(f"MTTR: `{fmt_minutes(actual)}`")
+                sc[2].markdown(f"Alvo: `{fmt_minutes(target)}`")
+                sc[3].markdown("✅" if within else "⚠️")
+        elif not kpis.get("resolved_count"):
+            st.info(
+                "Ainda não há incidentes resolvidos — o MTTR e o cumprimento de SLA "
+                "passam a ser calculados assim que fechar incidentes na aba "
+                "**SOCHAI Operations**."
+            )
+
+        st.divider()
+
         # ---- Incident metrics ----
         st.subheader("🚨 Incidentes")
         cols = st.columns(6)
@@ -1530,93 +1837,386 @@ with tabs[6]:
         "os playbooks de resposta e as missões de formação (gamificação) associadas."
     )
 
-    catalog = api("get", "/api/scenarios")
-    if isinstance(catalog, list) and catalog:
-        options = {s["id"]: s for s in catalog}
-        sel_id = st.selectbox(
-            "Cenário",
-            options=list(options.keys()),
-            format_func=lambda k: f"{options[k]['name']} ({options[k]['incident_count']} incidentes)",
+    scn_tabs = st.tabs([
+        "📚 Cenário do catálogo",
+        "🖥️ Cenário a partir dos ativos reais",
+    ])
+
+    # ---------------------------------------------------------------- #
+    # 7.1 — Cenário narrativo do catálogo
+    # ---------------------------------------------------------------- #
+    with scn_tabs[0]:
+        catalog = api("get", "/api/scenarios")
+        if isinstance(catalog, list) and catalog:
+            options = {s["id"]: s for s in catalog}
+            ui_state.keep_valid("scn_catalog_sel", list(options.keys()))
+            sel_id = st.selectbox(
+                "Cenário",
+                options=list(options.keys()),
+                format_func=lambda k: f"{options[k]['name']} ({options[k]['incident_count']} incidentes)",
+                key="scn_catalog_sel",
+            )
+            sel = options[sel_id]
+            st.write(sel["description"])
+            st.caption("Tipos de ameaça envolvidos: " + ", ".join(sel["threat_types"]))
+
+            run_btn = st.button("🚀 Executar Cenário", use_container_width=True, type="primary")
+
+            if run_btn:
+                with st.spinner(
+                    "A gerar incidentes, a associar playbooks e a criar cenários de formação... "
+                    "(pode demorar até 1 minuto)"
+                ):
+                    run_result = api(
+                        "post", "/api/scenarios/run",
+                        json={"scenario_id": sel_id}, timeout=120,
+                    )
+                if "error" in run_result:
+                    st.error(run_result["error"])
+                else:
+                    st.session_state["last_scenario_result"] = run_result
+                    ui_state.mark_fresh("last_scenario_result")
+
+            result = st.session_state.get("last_scenario_result")
+            if result and result.get("scenario_id") == sel_id:
+                _snap_at = ui_state.from_snapshot("last_scenario_result")
+                if _snap_at:
+                    st.info(
+                        f"📂 Resultado reposto do estado gravado em "
+                        f"{_snap_at[:16].replace('T', ' ')} — não foi executado agora. "
+                        "Volte a carregar em **Executar Cenário** para gerar incidentes novos."
+                    )
+                st.success(
+                    f"✅ Cenário **{result['scenario_name']}** executado — "
+                    f"{len(result['incidents'])} incidente(s) criado(s)."
+                )
+
+                st.subheader("🚨 Incidentes Gerados")
+                rows = [{
+                    "Incidente": inc["incident_id"],
+                    "Tipo": inc["type"],
+                    "Severidade": inc["severity"],
+                    "ML Score": inc["ml_score"],
+                    "HITL": "Sim" if inc["hitl_required"] else "Não",
+                    "Playbook": inc["playbook_id"],
+                    "Ativo Afetado": inc.get("asset_name") or "— (sem correspondência)",
+                    "Criticidade": inc.get("asset_criticality") or "—",
+                } for inc in result["incidents"]]
+                st.dataframe(rows, use_container_width=True, hide_index=True)
+                n_com_ativo = sum(1 for inc in result["incidents"] if inc.get("asset_id"))
+                st.caption(
+                    f"🖥️ {n_com_ativo}/{len(result['incidents'])} incidente(s) associados automaticamente "
+                    "a um ativo real (por IP de origem ou IP mencionado na descrição do alerta) — "
+                    "ver tab **Ativos** para o inventário completo."
+                )
+
+                st.subheader("📋 Playbooks Associados")
+                for pb in result["playbooks"]:
+                    with st.expander(
+                        f"**{pb['name']}** [{pb.get('playbook_id', '—')}] — {pb.get('threat_type', '')}"
+                    ):
+                        if pb.get("priority_actions"):
+                            st.write("**⚡ Ações Prioritárias:**")
+                            for pa in pb["priority_actions"]:
+                                st.markdown(f"- 🔴 {pa}")
+                        st.write("**📋 Passos:**")
+                        for step in pb.get("steps", []):
+                            st.markdown(f"- {step}")
+
+                st.subheader("🎮 Cenários de Formação Gerados")
+                st.caption("Já disponíveis na tab Gamificação → Missões.")
+                for sc in result["training_missions"]:
+                    with st.expander(
+                        f"🎯 **{sc.get('title', '—')}** | {sc.get('difficulty', '—')} "
+                        f"| ⭐ {sc.get('xp_reward', 0)} XP"
+                    ):
+                        st.write(sc.get("description", ""))
+                        for qi, q in enumerate(sc.get("questions", [])):
+                            st.write(f"**Q{qi + 1}.** {q['question']}")
+
+                if result.get("phishing_campaign"):
+                    camp = result["phishing_campaign"]
+                    st.subheader("🎣 Campanha de Phishing Sugerida")
+                    st.info(
+                        f"Campanha **{camp['name']}** lançada para {camp['targets']} colaborador(es) "
+                        "— já disponível nas tabs Gamificação e Analytics."
+                    )
+        else:
+            st.error("Não foi possível carregar o catálogo de cenários.")
+
+    # ---------------------------------------------------------------- #
+    # 7.2 — Cenário gerado a partir das vulnerabilidades dos ativos reais
+    # ---------------------------------------------------------------- #
+    with scn_tabs[1]:
+        st.subheader("🖥️ Cenário / Incidente a partir dos Ativos do Inventário")
+        st.caption(
+            "Analisa os ativos que existem na tab **Ativos** (serviços expostos e "
+            "configuração de segurança), identifica as vulnerabilidades reais de cada um "
+            "e constrói o incidente que a sua exploração produziria. De cada "
+            "vulnerabilidade encontrada nasce o **playbook** de resposta e, em "
+            "consequência, a **missão de gamificação** e o impacto no risco humano dos "
+            "colaboradores donos do ativo afetado."
         )
-        sel = options[sel_id]
-        st.write(sel["description"])
-        st.caption("Tipos de ameaça envolvidos: " + ", ".join(sel["threat_types"]))
 
-        run_btn = st.button("🚀 Executar Cenário", use_container_width=True, type="primary")
+        scan = api("get", "/api/scenarios/asset-risks", timeout=30)
+        if not (isinstance(scan, dict) and "assets" in scan):
+            st.error(
+                (scan or {}).get("error", "Não foi possível analisar o inventário de ativos.")
+            )
+        else:
+            summary = scan["summary"]
+            s1, s2, s3, s4 = st.columns(4)
+            s1.markdown(metric_card("Ativos analisados", summary["assets_scanned"]),
+                        unsafe_allow_html=True)
+            s2.markdown(metric_card("Ativos com falhas", summary["assets_at_risk"], "yellow"),
+                        unsafe_allow_html=True)
+            s3.markdown(metric_card("Vulnerabilidades", summary["vulnerabilities_found"], "red"),
+                        unsafe_allow_html=True)
+            s4.markdown(metric_card("Achados críticos", summary["critical_findings"], "red"),
+                        unsafe_allow_html=True)
 
-        if run_btn:
-            with st.spinner(
-                "A gerar incidentes, a associar playbooks e a criar cenários de formação... "
-                "(pode demorar até 1 minuto)"
-            ):
-                run_result = api(
-                    "post", "/api/scenarios/run",
-                    json={"scenario_id": sel_id}, timeout=120,
+            profiles = [p for p in scan["assets"] if p["vulnerability_count"]]
+            if not profiles:
+                st.success(
+                    "✅ Nenhum ativo do inventário apresenta fragilidades detetáveis — "
+                    "não há cenário para gerar. Registe serviços e configuração de "
+                    "segurança nos ativos (tab **Ativos**) para alimentar esta análise."
                 )
-            if "error" in run_result:
-                st.error(run_result["error"])
             else:
-                st.session_state["last_scenario_result"] = run_result
-
-        result = st.session_state.get("last_scenario_result")
-        if result and result.get("scenario_id") == sel_id:
-            st.success(
-                f"✅ Cenário **{result['scenario_name']}** executado — "
-                f"{len(result['incidents'])} incidente(s) criado(s)."
-            )
-
-            st.subheader("🚨 Incidentes Gerados")
-            rows = [{
-                "Incidente": inc["incident_id"],
-                "Tipo": inc["type"],
-                "Severidade": inc["severity"],
-                "ML Score": inc["ml_score"],
-                "HITL": "Sim" if inc["hitl_required"] else "Não",
-                "Playbook": inc["playbook_id"],
-                "Ativo Afetado": inc.get("asset_name") or "— (sem correspondência)",
-                "Criticidade": inc.get("asset_criticality") or "—",
-            } for inc in result["incidents"]]
-            st.dataframe(rows, use_container_width=True, hide_index=True)
-            n_com_ativo = sum(1 for inc in result["incidents"] if inc.get("asset_id"))
-            st.caption(
-                f"🖥️ {n_com_ativo}/{len(result['incidents'])} incidente(s) associados automaticamente "
-                "a um ativo real (por IP de origem ou IP mencionado na descrição do alerta) — "
-                "ver tab **Ativos** para o inventário completo."
-            )
-
-            st.subheader("📋 Playbooks Associados")
-            for pb in result["playbooks"]:
-                with st.expander(
-                    f"**{pb['name']}** [{pb.get('playbook_id', '—')}] — {pb.get('threat_type', '')}"
-                ):
-                    if pb.get("priority_actions"):
-                        st.write("**⚡ Ações Prioritárias:**")
-                        for pa in pb["priority_actions"]:
-                            st.markdown(f"- 🔴 {pa}")
-                    st.write("**📋 Passos:**")
-                    for step in pb.get("steps", []):
-                        st.markdown(f"- {step}")
-
-            st.subheader("🎮 Cenários de Formação Gerados")
-            st.caption("Já disponíveis na tab Gamificação → Missões.")
-            for sc in result["training_missions"]:
-                with st.expander(
-                    f"🎯 **{sc.get('title', '—')}** | {sc.get('difficulty', '—')} "
-                    f"| ⭐ {sc.get('xp_reward', 0)} XP"
-                ):
-                    st.write(sc.get("description", ""))
-                    for qi, q in enumerate(sc.get("questions", [])):
-                        st.write(f"**Q{qi + 1}.** {q['question']}")
-
-            if result.get("phishing_campaign"):
-                camp = result["phishing_campaign"]
-                st.subheader("🎣 Campanha de Phishing Sugerida")
-                st.info(
-                    f"Campanha **{camp['name']}** lançada para {camp['targets']} colaborador(es) "
-                    "— já disponível nas tabs Gamificação e Analytics."
+                st.divider()
+                st.write("**🔎 Superfície de ataque detetada no inventário**")
+                st.dataframe(
+                    [{
+                        "Ativo": p["asset_name"],
+                        "Tipo": p["asset_type"] or "—",
+                        "IP": p["ip_address"] or "—",
+                        "Criticidade": p["criticality"],
+                        "Risco (0-100)": p["risk_score"],
+                        "Vulnerabilidades": p["vulnerability_count"],
+                        "Mais grave": p["top_severity"] or "—",
+                        "Ameaças possíveis": ", ".join(p["threat_types"]),
+                    } for p in profiles],
+                    use_container_width=True, hide_index=True,
                 )
-    else:
-        st.error("Não foi possível carregar o catálogo de cenários.")
+
+                crit_icon = {"CRITICO": "🔴", "ALTO": "🟠", "MEDIO": "🟡", "BAIXO": "🟢"}
+                with st.expander("📄 Detalhe das vulnerabilidades por ativo"):
+                    for p in profiles:
+                        st.markdown(
+                            f"**{crit_icon.get(p['criticality'], '⚪')} "
+                            f"{p['asset_name']}** — risco {p['risk_score']}/100"
+                        )
+                        for v in p["vulnerabilities"]:
+                            st.markdown(
+                                f"- {sev_icon(v['severity'])} **{v['title']}** "
+                                f"({v['severity']}) — _{v['evidence']}_  \n"
+                                f"  ↳ permite: `{v['threat_type']}` · correção: {v['remediation']}"
+                            )
+                        st.divider()
+
+                st.write("**⚙️ Configuração do cenário**")
+                by_id = {p["asset_id"]: p for p in profiles}
+                # Pré-seleção: os 3 ativos mais expostos e, se nenhum deles tiver
+                # colaborador associado, o ativo com dono mais em risco — sem ele
+                # o cenário não chega à camada de gamificação.
+                default_assets = [p["asset_id"] for p in profiles[:3]]
+                if not any(by_id[i]["linked_users"] for i in default_assets):
+                    owned = next((p for p in profiles if p["linked_users"]), None)
+                    if owned:
+                        default_assets.append(owned["asset_id"])
+                # Descarta do snapshot os ativos apagados entretanto, para não
+                # ficarem a ser regravados indefinidamente em cada "Guardar estado".
+                ui_state.keep_valid("asset_scn_assets", list(by_id.keys()))
+                sel_assets = st.multiselect(
+                    "Ativos a incluir (vazio = todo o inventário)",
+                    options=list(by_id.keys()),
+                    default=default_assets,
+                    format_func=lambda k: (
+                        f"{by_id[k]['asset_name']} — risco {by_id[k]['risk_score']} "
+                        f"({by_id[k]['vulnerability_count']} vulnerabilidades)"
+                    ),
+                    key="asset_scn_assets",
+                )
+                o1, o2 = st.columns(2)
+                max_inc = o1.slider("Nº máximo de incidentes", 1, 10, 4, key="asset_scn_max")
+                per_asset = o2.slider(
+                    "Máx. vulnerabilidades por ativo", 1, 3, 2, key="asset_scn_per_asset"
+                )
+                gen_pb = st.checkbox(
+                    "Gerar playbooks à medida com IA (RAG + LLM) — mais lento",
+                    value=True, key="asset_scn_genpb",
+                    help=(
+                        "Sem chave de LLM configurada, ou se a geração falhar, o cenário "
+                        "usa o playbook curado da biblioteca para o tipo de ameaça."
+                    ),
+                )
+                launch_ph = st.checkbox(
+                    "Lançar simulação de phishing quando a falha for do domínio humano",
+                    value=True, key="asset_scn_phish",
+                )
+
+                gen_scn_btn = st.button(
+                    "🧨 Gerar Cenário a partir dos Ativos",
+                    use_container_width=True, type="primary", key="asset_scn_run",
+                )
+
+                if gen_scn_btn:
+                    with st.spinner(
+                        "A explorar as vulnerabilidades dos ativos, a gerar os playbooks "
+                        "de resposta e as missões de formação... (pode demorar até 2 minutos)"
+                    ):
+                        asset_result = api(
+                            "post", "/api/scenarios/from-assets",
+                            json={
+                                "asset_ids": sel_assets,
+                                "max_incidents": max_inc,
+                                "max_per_asset": per_asset,
+                                "generate_playbooks": gen_pb,
+                                "launch_phishing": launch_ph,
+                            },
+                            timeout=180,
+                        )
+                    if "error" in asset_result:
+                        st.error(asset_result["error"])
+                    else:
+                        st.session_state["asset_scenario_result"] = asset_result
+                        ui_state.mark_fresh("asset_scenario_result")
+
+                ares = st.session_state.get("asset_scenario_result")
+                if ares:
+                    st.divider()
+                    _ares_snap = ui_state.from_snapshot("asset_scenario_result")
+                    if _ares_snap:
+                        st.info(
+                            f"📂 Resultado reposto do estado gravado em "
+                            f"{_ares_snap[:16].replace('T', ' ')} — não foi executado agora."
+                        )
+                    st.success(
+                        f"✅ **{ares['scenario_name']}** — "
+                        f"{len(ares['incidents'])} incidente(s), "
+                        f"{len(ares['playbooks'])} playbook(s) e "
+                        f"{len(ares['training_missions'])} missão(ões) de formação geradas."
+                    )
+                    st.caption(
+                        f"Cenário `{ares['scenario_id']}` · ativos afetados: "
+                        + ", ".join(ares["assets_affected"])
+                    )
+                    if gen_pb and not ares.get("playbooks_generated_by_ai"):
+                        motivo = (
+                            "a geração com LLM não devolveu resultado"
+                            if ares.get("llm_available")
+                            else "não há chave de LLM configurada"
+                        )
+                        st.warning(
+                            f"Os playbooks vieram da biblioteca curada — {motivo}. "
+                            "A resposta a cada vulnerabilidade mantém-se válida, mas não "
+                            "está adaptada ao ativo concreto."
+                        )
+
+                    st.subheader("🚨 Incidentes gerados a partir das vulnerabilidades")
+                    st.dataframe(
+                        [{
+                            "Incidente": inc["incident_id"],
+                            "Ativo": inc["asset_name"],
+                            "Criticidade": inc["asset_criticality"],
+                            "Vulnerabilidade explorada": inc["vulnerability"],
+                            "Tipo": inc["type"],
+                            "Severidade": inc["severity"],
+                            "ML Score": inc["ml_score"],
+                            "HITL": "Sim" if inc["hitl_required"] else "Não",
+                            "Playbook": inc["playbook_id"] or "—",
+                        } for inc in ares["incidents"]],
+                        use_container_width=True, hide_index=True,
+                    )
+                    with st.expander("🔬 Narrativa de cada incidente e correção recomendada"):
+                        for inc in ares["incidents"]:
+                            st.markdown(
+                                f"**{sev_icon(inc['severity'])} {inc['incident_id']} — "
+                                f"{inc['asset_name']}**"
+                            )
+                            st.write(inc["description"])
+                            st.caption(
+                                f"Evidência no inventário: {inc['evidence']} · "
+                                f"Correção: {inc['remediation']}"
+                            )
+                            st.divider()
+
+                    st.subheader("📋 Playbooks gerados para estas vulnerabilidades")
+                    for pb in ares["playbooks"]:
+                        origem = "🤖 gerado por IA" if pb.get("is_generated") else "📚 biblioteca curada"
+                        with st.expander(
+                            f"**{pb['name']}** [{pb.get('playbook_id', '—')}] — "
+                            f"{pb.get('threat_type', '')} · {origem}"
+                        ):
+                            st.caption(
+                                "Responde a: "
+                                + "; ".join(
+                                    f"{v['title']} em {v['asset_name']}"
+                                    for v in pb.get("vulnerabilities", [])
+                                )
+                            )
+                            if pb.get("priority_actions"):
+                                st.write("**⚡ Ações Prioritárias:**")
+                                for pa in pb["priority_actions"]:
+                                    st.markdown(f"- 🔴 {pa}")
+                            st.write("**📋 Passos:**")
+                            for step in pb.get("steps", []):
+                                st.markdown(f"- {step}")
+                            if pb.get("estimated_time"):
+                                st.caption(f"⏱️ Tempo estimado: {pb['estimated_time']}")
+                            if pb.get("escalation_criteria"):
+                                st.caption(f"⬆️ Escalar quando: {pb['escalation_criteria']}")
+
+                    st.subheader("👥 Impacto nos colaboradores (risco humano)")
+                    if ares["affected_users"]:
+                        st.dataframe(
+                            [{
+                                "Colaborador": u.get("full_name") or u["username"],
+                                "Ativo afetado": u.get("asset_name") or "—",
+                                "Vulnerabilidade": u.get("vulnerability") or "—",
+                                "Novo Human Risk Score": u["new_risk_score"],
+                            } for u in ares["affected_users"]],
+                            use_container_width=True, hide_index=True,
+                        )
+                        st.caption(
+                            "O incidente no ativo sobe o risco humano do seu responsável "
+                            "e gera-lhe uma missão dirigida — ver tab **Resultados** para "
+                            "a evolução do HRS."
+                        )
+                    else:
+                        st.info(
+                            "Nenhum dos ativos afetados tem colaborador associado. "
+                            "Associe colaboradores aos ativos (tab **Gamificação → "
+                            "Utilizadores**) para que os incidentes gerem risco humano "
+                            "e missões dirigidas."
+                        )
+
+                    st.subheader("🎮 Missões de formação geradas")
+                    st.caption(
+                        "Já disponíveis na tab **Gamificação → Missões** e no portal do colaborador."
+                    )
+                    for sc in ares["training_missions"]:
+                        alvo = (
+                            f" · 🎯 {sc['target_username']}" if sc.get("target_username") else ""
+                        )
+                        with st.expander(
+                            f"🎯 **{sc.get('title', '—')}** | {sc.get('difficulty', '—')} "
+                            f"| ⭐ {sc.get('xp_reward', 0)} XP{alvo}"
+                        ):
+                            if sc.get("vulnerability"):
+                                st.caption(f"Origem: {sc['vulnerability']} em {sc.get('asset_name', '—')}")
+                            st.write(sc.get("description", ""))
+                            for qi, q in enumerate(sc.get("questions", [])):
+                                st.write(f"**Q{qi + 1}.** {q['question']}")
+
+                    if ares.get("phishing_campaign"):
+                        camp = ares["phishing_campaign"]
+                        st.subheader("🎣 Campanha de Phishing Lançada")
+                        st.info(
+                            f"Campanha **{camp['name']}** lançada para "
+                            f"{camp['targets']} colaborador(es) — já disponível nas tabs "
+                            "Gamificação e Analytics."
+                        )
 
 
 # ================================================================== #
@@ -1873,6 +2473,7 @@ with tabs[7]:
                     _all_ok = _all_ok and _proc.returncode == 0
                     _out.append(f"$ python {_script}\n{_proc.stdout}{_proc.stderr}")
             st.session_state["_sim_logs"] = "\n\n".join(_out)
+            ui_state.mark_fresh("_sim_logs")
             if _all_ok:
                 st.success("Simulações concluídas — resultados atualizados.")
             else:
@@ -1891,7 +2492,12 @@ with tabs[7]:
             st.caption("🕒 Resultados gerados em: " + " · ".join(_stamps))
 
     if st.session_state.get("_sim_logs"):
-        with st.expander("🖥️ Logs da última execução das simulações"):
+        _logs_snap = ui_state.from_snapshot("_sim_logs")
+        _logs_label = (
+            f"🖥️ Logs das simulações — do estado gravado em {_logs_snap[:16].replace('T', ' ')}"
+            if _logs_snap else "🖥️ Logs da última execução das simulações"
+        )
+        with st.expander(_logs_label):
             st.code(st.session_state["_sim_logs"])
 
     for _d in (_treino, _pop):

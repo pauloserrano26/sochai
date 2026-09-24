@@ -16,14 +16,41 @@ if exist ".venv\Scripts\activate.bat" (
 echo  [1/2] A iniciar API (FastAPI)...
 start "MESI API" cmd /k "python api_main.py"
 
-echo  A aguardar que a API fique disponivel (5s)...
-timeout /t 5 /nobreak > nul
+echo  A aguardar que a API fique disponivel...
+set /a _tries=0
+:wait_api
+curl -s -o nul -w "%{http_code}" http://localhost:8000/health > "%TEMP%\mesi_health.txt" 2>nul
+set /p _code=<"%TEMP%\mesi_health.txt"
+if "%_code%"=="200" goto api_ready
+set /a _tries+=1
+if %_tries% GEQ 60 (
+    echo  Aviso: API nao respondeu apos 60s — a continuar na mesma.
+    goto api_ready
+)
+timeout /t 1 /nobreak > nul
+goto wait_api
+:api_ready
+echo  API disponivel ^(%_tries%s^).
 
 echo  [2/2] A abrir Dashboard (Streamlit)...
 start "MESI Dashboard" cmd /k "streamlit run dashboard.py --server.headless false"
 
-echo  A aguardar que o Streamlit arranque (6s)...
-timeout /t 6 /nobreak > nul
+echo  A aguardar que o Streamlit arranque...
+set /a _tries=0
+:wait_dash
+curl -s -o nul -w "%{http_code}" http://localhost:8501 > "%TEMP%\mesi_dash.txt" 2>nul
+set /p _code=<"%TEMP%\mesi_dash.txt"
+if "%_code%"=="200" goto dash_ready
+set /a _tries+=1
+if %_tries% GEQ 60 (
+    echo  Aviso: Streamlit nao respondeu apos 60s — a abrir na mesma.
+    goto dash_ready
+)
+timeout /t 1 /nobreak > nul
+goto wait_dash
+:dash_ready
+echo  Streamlit disponivel ^(%_tries%s^).
+del /q "%TEMP%\mesi_health.txt" "%TEMP%\mesi_dash.txt" >nul 2>&1
 
 echo  [3/3] A abrir browser...
 start "" "http://localhost:8501"

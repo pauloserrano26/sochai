@@ -31,9 +31,31 @@ class Asset(Base):
     location = Column(String(200))
     description = Column(Text)
     tags = Column(JSON, default=list)
+    services = Column(JSON, default=list)     # [{name, port, protocol, version, exposed}]
+    config = Column(JSON, default=dict)       # {patched, av_agent, edr_agent, mfa_enabled, ...}
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AssetRelation(Base):
+    __tablename__ = "asset_relations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_asset_id = Column(Integer, ForeignKey("assets.id"), nullable=False, index=True)
+    target_asset_id = Column(Integer, ForeignKey("assets.id"), nullable=False, index=True)
+    relation_type = Column(String(50), nullable=False, default="connected_to")
+    protocol = Column(String(30))
+    port = Column(Integer)
+    network_zone = Column(String(100))
+    description = Column(Text)
+    tags = Column(JSON, default=list)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    source_asset = relationship("Asset", foreign_keys=[source_asset_id])
+    target_asset = relationship("Asset", foreign_keys=[target_asset_id])
 
 
 class User(Base):
@@ -287,6 +309,14 @@ def run_migrations():
                 conn.execute(text(
                     "ALTER TABLE users ADD COLUMN asset_id INTEGER REFERENCES assets(id)"
                 ))
+
+    if "assets" in inspector.get_table_names():
+        existing_asset_cols = {c["name"] for c in inspector.get_columns("assets")}
+        with engine.begin() as conn:
+            if "services" not in existing_asset_cols:
+                conn.execute(text("ALTER TABLE assets ADD COLUMN services JSON"))
+            if "config" not in existing_asset_cols:
+                conn.execute(text("ALTER TABLE assets ADD COLUMN config JSON"))
 
 
 def get_db():

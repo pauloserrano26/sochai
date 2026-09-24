@@ -5,10 +5,8 @@ Trains on synthetic baseline data at startup; no external training data required
 """
 
 import numpy as np
-from sklearn.ensemble import IsolationForest
-from sklearn.preprocessing import StandardScaler
 from datetime import datetime
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Optional
 
 
 FEATURE_NAMES = [
@@ -45,6 +43,9 @@ class SOCMLDetector:
     """Ensemble ML detector — L2 of the SOCHAI pipeline."""
 
     def __init__(self):
+        from sklearn.ensemble import IsolationForest
+        from sklearn.preprocessing import StandardScaler
+
         self._scaler = StandardScaler()
         self._iso_forest = IsolationForest(
             n_estimators=200,
@@ -212,5 +213,13 @@ class SOCMLDetector:
         return "MONITORAMENTO AUTOMÁTICO — sem intervenção humana"
 
 
-# Singleton
-ml_detector = SOCMLDetector()
+# Lazy singleton — the IsolationForest is only imported/trained on first real
+# use, not at module import time (training + sklearn import cost ~3s).
+_ml_detector: Optional[SOCMLDetector] = None
+
+
+def get_ml_detector() -> SOCMLDetector:
+    global _ml_detector
+    if _ml_detector is None:
+        _ml_detector = SOCMLDetector()
+    return _ml_detector

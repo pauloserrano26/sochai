@@ -13,7 +13,6 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-from langchain_openai import ChatOpenAI
 from config import config
 
 
@@ -149,6 +148,7 @@ class PlaybookEngine:
 
     def _get_llm(self):
         if self._llm is None:
+            from langchain_openai import ChatOpenAI
             self._llm = ChatOpenAI(
                 model="gpt-4o-mini",
                 api_key=config.OPENAI_API_KEY,

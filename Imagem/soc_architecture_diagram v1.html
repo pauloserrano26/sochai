@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ONDAS SOCHAI Architecture — Paulo Serrano, 710</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;600;700;800&display=swap');
+
+  :root {
+    --bg:        #050d1a;
+    --bg2:       #091526;
+    --panel:     #0c1f35;
+    --border:    #1a3a5c;
+    --accent:    #00d4ff;
+    --accent2:   #0087cc;
+    --green:     #00e676;
+    --green2:    #00c853;
+    --amber:     #ffab00;
+    --red:       #ff5252;
+    --purple:    #b388ff;
+    --teal:      #1de9b6;
+    --text:      #cde4f5;
+    --dim:       #5c8aaa;
+    --mono:      'Share Tech Mono', monospace;
+    --head:      'Exo 2', sans-serif;
+    --body:      'Rajdhani', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--body);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid noise overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.02) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none; z-index: 0;
+  }
+
+  .wrapper { position: relative; z-index: 1; max-width: 1200px; margin: 0 auto; padding: 28px 24px 60px; }
+
+  /* ── HEADER ─────────────────────────────────────────────────────────────── */
+  header {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 20px; margin-bottom: 32px;
+    gap: 16px; flex-wrap: wrap;
+  }
+  .logo-block { display: flex; flex-direction: column; gap: 4px; }
+  .logo-tag {
+    font-family: var(--mono); font-size: 10px; color: var(--accent);
+    letter-spacing: 3px; text-transform: uppercase;
+  }
+  h1 {
+    font-family: var(--head); font-size: clamp(18px, 3vw, 26px); font-weight: 800;
+    color: #fff; line-height: 1.1;
+    text-shadow: 0 0 20px rgba(0,212,255,0.3);
+  }
+  h1 span { color: var(--accent); }
+  .meta {
+    font-family: var(--mono); font-size: 10px; color: var(--dim);
+    display: flex; flex-direction: column; align-items: flex-end; gap: 3px;
+  }
+  .meta b { color: var(--accent2); }
+
+  /* ── LEGEND ─────────────────────────────────────────────────────────────── */
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 16px;
+    margin-bottom: 28px;
+    padding: 14px 18px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+  }
+  .leg-item { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; letter-spacing: .5px; }
+  .leg-dot { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
+
+  /* ── GAP TABLE ───────────────────────────────────────────────────────────── */
+  .gap-section { margin-bottom: 36px; }
+  .section-title {
+    font-family: var(--head); font-size: 13px; font-weight: 700;
+    color: var(--accent); text-transform: uppercase; letter-spacing: 2px;
+    margin-bottom: 14px; display: flex; align-items: center; gap: 8px;
+  }
+  .section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  .gap-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 10px;
+  }
+  .gap-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 12px 14px;
+    transition: border-color .2s, transform .15s;
+    cursor: default;
+    position: relative; overflow: hidden;
+  }
+  .gap-card::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  }
+  .gap-card:hover { transform: translateY(-2px); }
+  .gap-card.axis-a::before { background: var(--accent); }
+  .gap-card.axis-b::before { background: var(--amber); }
+  .gap-card.axis-c::before { background: var(--purple); }
+  .gap-card.axis-d::before { background: var(--teal); }
+  .gap-card:hover.axis-a { border-color: var(--accent); }
+  .gap-card:hover.axis-b { border-color: var(--amber); }
+  .gap-card:hover.axis-c { border-color: var(--purple); }
+  .gap-card:hover.axis-d { border-color: var(--teal); }
+
+  .gap-ref { font-family: var(--mono); font-size: 10px; color: var(--dim); margin-bottom: 4px; }
+  .gap-title { font-size: 12px; font-weight: 700; color: #fff; margin-bottom: 6px; line-height: 1.3; }
+  .gap-lacuna { font-size: 11px; color: #ff8a65; line-height: 1.4; font-weight: 500; }
+  .gap-solve { font-size: 11px; color: #a5d6a7; line-height: 1.4; margin-top: 5px; font-weight: 500; }
+  .gap-arrow { color: var(--green); font-weight: 700; margin-right: 3px; }
+
+  /* ── ARCHITECTURE ────────────────────────────────────────────────────────── */
+  .arch-section { margin-bottom: 36px; }
+
+  /* Layer wrapper */
+  .arch-layers { display: flex; flex-direction: column; gap: 10px; }
+
+  .layer {
+    border: 1px solid var(--border);
+    background: var(--panel);
+    overflow: hidden;
+    transition: border-color .2s;
+  }
+  .layer:hover { border-color: var(--accent2); }
+
+  .layer-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+  }
+  .layer-num {
+    font-family: var(--mono); font-size: 10px;
+    background: rgba(0,212,255,.1); color: var(--accent);
+    padding: 2px 8px; border: 1px solid rgba(0,212,255,.3);
+    flex-shrink: 0;
+  }
+  .layer-name {
+    font-family: var(--head); font-size: 14px; font-weight: 700;
+    flex: 1; letter-spacing: .5px;
+  }
+  .layer-tag {
+    font-family: var(--mono); font-size: 10px;
+    padding: 2px 8px; border: 1px solid; flex-shrink: 0;
+  }
+  .layer-chevron { font-size: 12px; color: var(--dim); transition: transform .25s; flex-shrink: 0; }
+  .layer.open .layer-chevron { transform: rotate(180deg); }
+
+  .layer-body {
+    display: none; padding: 16px;
+    animation: fadeIn .2s ease;
+  }
+  .layer.open .layer-body { display: block; }
+
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
+  .layer-desc {
+    font-size: 13px; color: var(--text); line-height: 1.6;
+    margin-bottom: 14px; max-width: 820px;
+  }
+  .gap-fixes {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px;
+  }
+  .gap-fix {
+    font-size: 11px; font-family: var(--mono);
+    padding: 4px 10px; border: 1px solid;
+    background: rgba(0,0,0,.3);
+  }
+
+  .components-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 8px;
+  }
+  .comp-card {
+    background: rgba(0,0,0,.4);
+    border: 1px solid var(--border);
+    padding: 10px 12px;
+    transition: border-color .2s;
+  }
+  .comp-card:hover { border-color: var(--accent2); }
+  .comp-name {
+    font-size: 12px; font-weight: 700; color: #fff;
+    margin-bottom: 4px; display: flex; align-items: center; gap: 6px;
+  }
+  .comp-icon { font-size: 14px; }
+  .comp-tech { font-family: var(--mono); font-size: 10px; color: var(--accent); margin-bottom: 5px; }
+  .comp-detail { font-size: 11px; color: var(--dim); line-height: 1.4; }
+  .comp-gap { font-size: 10px; color: var(--green); margin-top: 4px; font-style: italic; }
+
+  /* Colour per layer */
+  .l1 .layer-name { color: var(--accent); }
+  .l1 .layer-tag  { color: var(--accent); border-color: rgba(0,212,255,.4); background: rgba(0,212,255,.07); }
+  .l2 .layer-name { color: var(--amber); }
+  .l2 .layer-tag  { color: var(--amber);  border-color: rgba(255,171,0,.4);  background: rgba(255,171,0,.07); }
+  .l3 .layer-name { color: var(--green); }
+  .l3 .layer-tag  { color: var(--green);  border-color: rgba(0,230,118,.4);  background: rgba(0,230,118,.07); }
+  .l4 .layer-name { color: var(--purple); }
+  .l4 .layer-tag  { color: var(--purple); border-color: rgba(179,136,255,.4); background: rgba(179,136,255,.07); }
+  .l5 .layer-name { color: var(--teal); }
+  .l5 .layer-tag  { color: var(--teal);   border-color: rgba(29,233,182,.4);  background: rgba(29,233,182,.07); }
+  .l6 .layer-name { color: #ef9a9a; }
+  .l6 .layer-tag  { color: #ef9a9a;  border-color: rgba(239,154,154,.4);  background: rgba(239,154,154,.07); }
+
+  .fix-a { color: var(--accent);  border-color: rgba(0,212,255,.4);  background: rgba(0,212,255,.06); }
+  .fix-b { color: var(--amber);   border-color: rgba(255,171,0,.4);   background: rgba(255,171,0,.06); }
+  .fix-c { color: var(--purple);  border-color: rgba(179,136,255,.4); background: rgba(179,136,255,.06); }
+  .fix-d { color: var(--teal);    border-color: rgba(29,233,182,.4);  background: rgba(29,233,182,.06); }
+
+  /* ── DATA FLOW ────────────────────────────────────────────────────────────── */
+  .flow-section { margin-bottom: 36px; }
+  .flow-row {
+    display: flex; align-items: stretch; gap: 0;
+    margin-bottom: 6px; flex-wrap: wrap;
+  }
+  .flow-step {
+    flex: 1; min-width: 120px;
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 10px 12px; text-align: center;
+    position: relative;
+    transition: border-color .2s;
+  }
+  .flow-step:hover { border-color: var(--accent); }
+  .flow-step:not(:last-child)::after {
+    content: '▶';
+    position: absolute; right: -14px; top: 50%; transform: translateY(-50%);
+    color: var(--accent); font-size: 12px; z-index: 2;
+  }
+  .flow-step + .flow-step { margin-left: 16px; }
+  .flow-label { font-size: 11px; font-weight: 700; color: #fff; margin-bottom: 3px; }
+  .flow-sub   { font-family: var(--mono); font-size: 9px; color: var(--dim); }
+
+  /* ── METRICS ─────────────────────────────────────────────────────────────── */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 10px; margin-bottom: 36px;
+  }
+  .metric-card {
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 14px 16px; text-align: center;
+    transition: border-color .2s, transform .15s;
+  }
+  .metric-card:hover { transform: translateY(-3px); border-color: var(--accent); }
+  .metric-val { font-family: var(--mono); font-size: 22px; font-weight: 700; line-height: 1; margin-bottom: 4px; }
+  .metric-label { font-size: 11px; color: var(--dim); font-weight: 600; letter-spacing: .5px; }
+  .metric-source { font-family: var(--mono); font-size: 9px; color: rgba(92,138,170,.6); margin-top: 5px; }
+
+  /* ── FOOTER ──────────────────────────────────────────────────────────────── */
+  footer {
+    border-top: 1px solid var(--border); padding-top: 16px; margin-top: 8px;
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;
+  }
+  footer span { font-family: var(--mono); font-size: 10px; color: var(--dim); }
+
+  /* pulse animation on live badge */
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .live { animation: pulse 2s infinite; }
+</style>
+</head>
+<body>
+<div class="wrapper">
+
+  <!-- HEADER -->
+  <header>
+    <div class="logo-block">
+      <div class="logo-tag">▸ ONDAS Framework · IPBeja MESI-FIC · 2025</div>
+      <h1>Arquitetura <span>SOCHAI do Futuro</span><br>Proposta de Solução Integrada</h1>
+      <div style="font-size:12px;color:var(--dim);margin-top:6px;font-family:var(--mono)">
+        "O SOCHAI do Futuro: Fator Humano e Novas Competências em Cibersegurança na Era da IA"
+      </div>
+    </div>
+    <div class="meta">
+      <span><b>AUTOR</b> Paulo Serrano, 710</span>
+      <span><b>ORIENT.</b> Prof. Dr. Daniel Franco</span>
+      <span><b>VERSÃO</b> v3.0 · Dez 2025</span>
+      <span class="live" style="color:var(--green)">● ARQUITETURA PROPOSTA</span>
+    </div>
+  </header>
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:var(--accent)"></div> Eixo A — Automação SOCHAI</div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--amber)"></div> Eixo B — LLMs & Playbooks</div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--purple)"></div> Eixo C — Analistas (XAI/HITL)</div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--teal)"></div> Eixo D — Gamificação Colaboradores</div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--green)"></div> Gap Resolvido</div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--red)"></div> Gap Identificado nos Benchmarks</div>
+  </div>
+
+  <!-- GAPS SECTION -->
+  <div class="gap-section">
+    <div class="section-title">Lacunas dos Benchmarks → Solução Arquitectural</div>
+    <div class="gap-grid">
+
+      <div class="gap-card axis-a">
+        <div class="gap-ref">REF013 · Islam 2023</div>
+        <div class="gap-title">Application of AI/ML in SOC</div>
+        <div class="gap-lacuna">✗ Sem validação experimental · sem métricas SOC standard · algoritmos ML não testados em produção · zero dimensão humana</div>
+        <div class="gap-solve"><span class="gap-arrow">→</span>Camada de Telemetria com datasets reais + pipeline CI/CD de modelos + métricas operacionais MTTD/MTTR/FPR</div>
+      </div>
+
+      <div class="gap-card axis-b">
+        <div class="gap-ref">REF015 · Wei et al. 2025</div>
+        <div class="gap-title">CORTEX: LLM Alert Triage</div>
+        <div class="gap-lacuna">✗ Dataset limitado (10 cenários) · sensível a prompt injection · 152s/alerta · sem playbooks · sem métricas humanas</div>
+        <div class="gap-solve"><span class="gap-arrow">→</span>Motor LLM com RAG + dataset diversificado + guard-rails anti-injection + Playbook Engine integrado + HITL</div>
+      </div>
+
+      <div class="gap-card axis-a">
+        <div class="gap-ref">REF016 · IAENG 2024</div>
+        <div class="gap-title">Ensemble HMM+LSTM+XGBoost</div>
+        <div class="gap-lacuna">✗ Dataset CIC-IDS-2017 desatualizado · testado só em brute-force · sem integração SIEM/SOAR · sem escalabilidade enterprise</div>
+        <div class="gap-solve"><span class="gap-arrow">→</span>Pipeline de ingestão multi-fonte com datasets recentes + integração nativa SIEM/SOAR + concept drift adaptation</div>
+      </div>
+
+      <div class="gap-card axis-a">
+        <div class="gap-ref">REF017 · Ban et al. 2021</div>
+        <div class="gap-title">Combat Alert Fatigue WSVM</div>
+        <div class="gap-lacuna">✗ Dataset não público · contexto single-enterprise · sem visualização em tempo real · sem generalização multi-contexto</div>
+        <div class="gap-solve"><span class="gap-arrow">→</span>Dashboard tempo real com tile graphs + modelo transferível multi-org + feature store partilhada</div>
+      </div>
+
+      <div class="gap-card axis-c">
+        <div class="gap-ref">REF025 · Mohsin et al. 2025</div>
+        <div class="gap-title">CyberAlly HITL Framework</div>
+        <div class="gap-lacuna">✗ Validação só em cyber range simulado · sem playbook generation · sem módulo de formação · governance nível 4 em aberto</div>
+        <div class="gap-solve"><span class="gap-arrow">→</span>Framework 5-níveis HITL em ambiente real PME + Playbook Engine + módulo gamificação + governance progressivo</div>
+      </div>
+
+      <div class="gap-card axis-b">
+        <div class="gap-ref">REF026 · Srinivas et al. 2025</div>
+        <div class="gap-title">AI-Augmented SOC Survey</div>
+        <div class="gap-lacuna">✗ Heterogeneidade de benchmarks · hallucinations LLM · sem integração legacy · privacidade de dados · sem Capability-Maturity Model</div>
+        <div class="gap-solve"><span class="gap-arrow">→</span>Benchmark unificado interno + hallucination guard + connectors legacy (Splunk, QRadar) + CMM-SOCHAI integrado</div>
+      </div>
+
+      <div class="gap-card axis-c">
+        <div class="gap-ref">REF027 · Singh et al. 2025</div>
+        <div class="gap-title">LLMs in SOC Empirical Study</div>
+        <div class="gap-lacuna">✗ SOC único (eSentire) · GPT-4 específico · sem métricas objectivas de outcome · sem trust calibration longitudinal</div>
+        <div class="gap-solve"><span class="gap-arrow">→</span>Multi-SOC PME + modelo-agnóstico (MCP) + métricas outcome (MTTR, FPR) + painel trust calibration</div>
+      </div>
+
+      <div class="gap-card axis-d">
+        <div class="gap-ref">REF030 · Karagiannis 2024</div>
+        <div class="gap-title">NICE-by-Design Cyber Range</div>
+        <div class="gap-lacuna">✗ Formação isolada do SOC · sem gamificação adaptativa · PR-VAM-001 0% coberta · sem feedback ao SOC</div>
+        <div class="gap-solve"><span class="gap-arrow">→</span>Módulo gamificação alimentado por incidentes reais + Human Risk Score contínuo + cobertura NICE completa</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ARCHITECTURE LAYERS -->
+  <div class="arch-section">
+    <div class="section-title">Arquitetura de 6 Camadas — ONDAS SOCHAI Framework</div>
+    <div class="arch-layers">
+
+      <!-- LAYER 1 -->
+      <div class="layer l1 open">
+        <div class="layer-header" onclick="toggle(this)">
+          <div class="layer-num">L1</div>
+          <div class="layer-name">CAMADA DE INGESTÃO & TELEMETRIA</div>
+          <div class="layer-tag">DATA INGESTION</div>
+          <div class="layer-chevron">▼</div>
+        </div>
+        <div class="layer-body">
+          <div class="layer-desc">
+            Recolha normalizada e em tempo real de todas as fontes de dados da organização. Resolve o gap do REF016 (dataset desatualizado) e REF017 (single-enterprise) através de um pipeline multi-fonte agnóstico com concept drift detection integrado e suporte a ambientes PME heterogéneos.
+          </div>
+          <div class="gap-fixes">
+            <span class="gap-fix fix-a">▸ REF016: datasets recentes</span>
+            <span class="gap-fix fix-a">▸ REF017: multi-enterprise</span>
+            <span class="gap-fix fix-a">▸ REF013: métricas standard</span>
+            <span class="gap-fix fix-b">▸ REF026: integração legacy</span>
+          </div>
+          <div class="components-grid">
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">📡</span>Log Collector</div>
+              <div class="comp-tech">FluentBit · Logstash · syslog-ng</div>
+              <div class="comp-detail">Endpoints, servidores, firewalls, cloud (AWS CloudTrail, Azure AD). Normalização CEF/LEEF.</div>
+              <div class="comp-gap">✓ Corrige gap REF016: fontes diversificadas</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🔌</span>Legacy Connectors</div>
+              <div class="comp-tech">Splunk · QRadar · Elastic SIEM</div>
+              <div class="comp-detail">Integração com SIEM existentes via API + parsers customizados para PME sem stack moderna.</div>
+              <div class="comp-gap">✓ Corrige gap REF026: integração legacy</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">☁️</span>Cloud & SaaS Monitor</div>
+              <div class="comp-tech">Azure AD · AWS · M365 · Salesforce</div>
+              <div class="comp-detail">Monitorização de credenciais, login anómalo, acessos SaaS — cenários reais do CORTEX.</div>
+              <div class="comp-gap">✓ Corrige gap REF015: dataset limitado</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">📊</span>Feature Store</div>
+              <div class="comp-tech">Redis · Apache Hudi · Delta Lake</div>
+              <div class="comp-detail">Repositório de features partilhado entre modelos ML com versioning e lineage tracking.</div>
+              <div class="comp-gap">✓ Resolve ausência de dados públicos (REF002, REF017)</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🔄</span>Drift Detector</div>
+              <div class="comp-tech">River ML · Alibi-Detect</div>
+              <div class="comp-detail">Deteta concept drift em dados de entrada, aciona re-treino automático dos modelos.</div>
+              <div class="comp-gap">✓ Resolve dataset envelhecimento REF016</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🔒</span>Privacy Guard</div>
+              <div class="comp-tech">Differential Privacy · Anonymisation</div>
+              <div class="comp-detail">Anonimização automática de dados sensíveis. GDPR compliance para contexto PME europeia.</div>
+              <div class="comp-gap">✓ Resolve gap privacidade REF026</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LAYER 2 -->
+      <div class="layer l2">
+        <div class="layer-header" onclick="toggle(this)">
+          <div class="layer-num">L2</div>
+          <div class="layer-name">CAMADA DE DETEÇÃO & ANÁLISE MULTIMODELO</div>
+          <div class="layer-tag">DETECTION ENGINE</div>
+          <div class="layer-chevron">▼</div>
+        </div>
+        <div class="layer-body">
+          <div class="layer-desc">
+            Motor de deteção em tempo real com ensemble de modelos ML/DL clássicos e modernos. Supera o gap do REF016 (modelo único) e REF013 (sem validação experimental) através de uma abordagem stacking multi-modelo com SMOTE-ENN balanceamento e métricas MTTD/MTTR em produção.
+          </div>
+          <div class="gap-fixes">
+            <span class="gap-fix fix-a">▸ REF016: stacking ensemble validado</span>
+            <span class="gap-fix fix-a">▸ REF013: validação experimental real</span>
+            <span class="gap-fix fix-a">▸ REF017: WSVM multi-contexto</span>
+            <span class="gap-fix fix-a">▸ REF001: validação SOC operacional</span>
+          </div>
+          <div class="components-grid">
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🧠</span>Stacking Ensemble</div>
+              <div class="comp-tech">HMM + LSTM + XGBoost (REF016)</div>
+              <div class="comp-detail">Accuracy 99% em deteção intrusão. MTTD ~5.4s, MTTR ~0.19s. Deploy via API REST.</div>
+              <div class="comp-gap">✓ Estende REF016 a múltiplos vetores ataque</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">⚖️</span>WSVM Alert Classifier</div>
+              <div class="comp-tech">Weighted SVM (REF017)</div>
+              <div class="comp-detail">FPR 0.001%, Recall 99.6% em dados reais. Priorização de alertas críticos com tile graph viz.</div>
+              <div class="comp-gap">✓ Generaliza REF017 a multi-enterprise</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🔍</span>Anomaly Detector</div>
+              <div class="comp-tech">Autoencoder + Isolation Forest</div>
+              <div class="comp-detail">Deteção não supervisionada de comportamentos anómalos em cloud e rede (REF005).</div>
+              <div class="comp-gap">✓ Resolve FP elevados REF005 multi-cloud</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🦠</span>Malware Classifier</div>
+              <div class="comp-tech">BERT fine-tuned + Transformers</div>
+              <div class="comp-detail">F1: 99.1% classificação malware (REF009). Pipeline contínuo com concept drift adaptation.</div>
+              <div class="comp-gap">✓ Adiciona RE009 concept drift que faltava</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">📈</span>Benchmark Monitor</div>
+              <div class="comp-tech">MLflow · Prometheus · Grafana</div>
+              <div class="comp-detail">Dashboard métricas unificado: FPR, F1, MTTD, MTTR por modelo. Resolve ausência métricas REF013.</div>
+              <div class="comp-gap">✓ Métricas SOC standard (gap REF013)</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🏗️</span>Model CI/CD</div>
+              <div class="comp-tech">Kubeflow · DVC · GitHub Actions</div>
+              <div class="comp-detail">Re-treino automático quando drift detectado. Rollback automático se performance degrada.</div>
+              <div class="comp-gap">✓ Validação contínua em produção real</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LAYER 3 -->
+      <div class="layer l3">
+        <div class="layer-header" onclick="toggle(this)">
+          <div class="layer-num">L3</div>
+          <div class="layer-name">CAMADA LLM MULTIAGENTE & PLAYBOOK ENGINE</div>
+          <div class="layer-tag">AI AGENTS + PLAYBOOKS</div>
+          <div class="layer-chevron">▼</div>
+        </div>
+        <div class="layer-body">
+          <div class="layer-desc">
+            Motor LLM multiagente para triagem inteligente de alertas (estende CORTEX — REF015) com módulo de geração automática de playbooks (gap ausente em toda a literatura). Supera a latência do CORTEX (152s) através de distilação de modelos compactos e resolve a sensibilidade a prompt injection com guard-rails dedicados.
+          </div>
+          <div class="gap-fixes">
+            <span class="gap-fix fix-b">▸ REF015: dataset > 10 cenários</span>
+            <span class="gap-fix fix-b">▸ REF015: prompt injection guard</span>
+            <span class="gap-fix fix-b">▸ REF015: latência < 152s</span>
+            <span class="gap-fix fix-b">▸ REF015: playbooks (gap ausente)</span>
+            <span class="gap-fix fix-b">▸ REF026: benchmark unificado</span>
+            <span class="gap-fix fix-b">▸ REF026: hallucination control</span>
+          </div>
+          <div class="components-grid">
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🎯</span>Orchestrator Agent</div>
+              <div class="comp-tech">LLM (GPT-4o / Claude 3.5) + MCP</div>
+              <div class="comp-detail">Coordena pipeline de 4 agentes. Mapeia alerta → workflow específico. Enforce coerência.</div>
+              <div class="comp-gap">✓ Estende CORTEX com contexto PME</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🔎</span>Behavior Analysis Agent</div>
+              <div class="comp-tech">ReAct + Tool Use + SIEM API</div>
+              <div class="comp-detail">Inspeciona metadados, padrões comportamentais, mapeia a MITRE ATT&CK automaticamente.</div>
+              <div class="comp-gap">✓ REF007: cobertura ATT&CK completa</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🕵️</span>Evidence Agent</div>
+              <div class="comp-tech">Tool calling · Knowledge Graph</div>
+              <div class="comp-detail">Recolhe evidências de múltiplas ferramentas (AD, logs, endpoint, cloud) em paralelo.</div>
+              <div class="comp-gap">✓ Resolve dataset limitado REF015</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">⚖️</span>Reasoning Agent</div>
+              <div class="comp-tech">Chain-of-Thought + SHAP</div>
+              <div class="comp-detail">Agrega veredictos, cross-verifica evidências, categoriza (actionable/FP/undetermined) com justificação.</div>
+              <div class="comp-gap">✓ XAI integrada — resolve REF020</div>
+            </div>
+            <div class="comp-card" style="border-color:rgba(255,171,0,.4)">
+              <div class="comp-name"><span class="comp-icon">📋</span>Playbook Generator</div>
+              <div class="comp-tech">LLM + RAG + MITRE ATT&CK</div>
+              <div class="comp-detail">Gera playbooks passo-a-passo para cada incidente. Personaliza ao contexto PME (setor, stack, dimensão).</div>
+              <div class="comp-gap" style="color:var(--amber)">★ NOVO — gap ausente em toda a literatura</div>
+            </div>
+            <div class="comp-card" style="border-color:rgba(255,171,0,.4)">
+              <div class="comp-name"><span class="comp-icon">🔄</span>Playbook Updater</div>
+              <div class="comp-tech">RAG + Threat Feeds + Versioning</div>
+              <div class="comp-detail">Atualiza playbooks existentes quando surgem novas variantes. Knowledge base viva com Git-style versioning.</div>
+              <div class="comp-gap" style="color:var(--amber)">★ NOVO — playbooks vivos vs. estáticos</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🛡️</span>Injection Guard</div>
+              <div class="comp-tech">Prompt Shield + Input Validation</div>
+              <div class="comp-detail">Filtra prompt injection, context shift e adversarial inputs antes de chegarem ao LLM.</div>
+              <div class="comp-gap">✓ Resolve vulnerabilidade REF015</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">⚡</span>Distilled Model</div>
+              <div class="comp-tech">Model Distillation · Quantization</div>
+              <div class="comp-detail">Modelo compacto (7B-13B) para triagem rápida de alertas de baixo risco. Latência < 20s.</div>
+              <div class="comp-gap">✓ Resolve latência 152s do CORTEX</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LAYER 4 -->
+      <div class="layer l4">
+        <div class="layer-header" onclick="toggle(this)">
+          <div class="layer-num">L4</div>
+          <div class="layer-name">CAMADA XAI & HUMAN-IN-THE-LOOP (HITL)</div>
+          <div class="layer-tag">ANALYST COLLABORATION</div>
+          <div class="layer-chevron">▼</div>
+        </div>
+        <div class="layer-body">
+          <div class="layer-desc">
+            Interface de colaboração entre IA e analistas SOCHAI com explicabilidade completa (XAI) e framework de 5 níveis de autonomia (estende CyberAlly — REF025). Resolve os gaps de fadiga cognitiva (REF018, REF019), desconfiança (REF020), burnout (REF021) e falta de explicabilidade dos playbooks gerados por IA.
+          </div>
+          <div class="gap-fixes">
+            <span class="gap-fix fix-c">▸ REF018: modelos cognitivos integrados</span>
+            <span class="gap-fix fix-c">▸ REF019: redução FP percecionados</span>
+            <span class="gap-fix fix-c">▸ REF020: XAI em SIEM real</span>
+            <span class="gap-fix fix-c">▸ REF021: automação tarefas repetitivas</span>
+            <span class="gap-fix fix-c">▸ REF025: ambiente real (não simulado)</span>
+            <span class="gap-fix fix-c">▸ REF027: multi-SOC + métricas outcome</span>
+          </div>
+          <div class="components-grid">
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🔮</span>XAI Engine</div>
+              <div class="comp-tech">LIME · SHAP · Counterfactuals</div>
+              <div class="comp-detail">Explicações por alerta: "Porquê este veredicto?", feature importance visual, contrafactuais.</div>
+              <div class="comp-gap">✓ Integra XAI em SIEM real (gap REF020)</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🎛️</span>HITL Dashboard</div>
+              <div class="comp-tech">React + WebSocket + D3.js</div>
+              <div class="comp-detail">Painel de analista com 5 níveis de autonomia selecionáveis. Feedback loop: aprovação/rejeição treina modelo.</div>
+              <div class="comp-gap">✓ Estende REF025 a contexto real PME</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🧘</span>Cognitive Load Monitor</div>
+              <div class="comp-tech">Biometric API · Task Complexity Score</div>
+              <div class="comp-detail">Monitoriza carga cognitiva do analista. Ajusta automaticamente fluxo de alertas em picos.</div>
+              <div class="comp-gap">✓ Modelos cognitivos integrados (REF018)</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🔔</span>Smart Alert Prioritizer</div>
+              <div class="comp-tech">WSVM + Contextual Bandits</div>
+              <div class="comp-detail">Priorização adaptativa: aprende com feedback do analista. Reduz alertas Tier-1 até 61% (benchmark REF010).</div>
+              <div class="comp-gap">✓ Resolve 99% FP percecionados REF019</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">📋</span>Playbook Validator</div>
+              <div class="comp-tech">HITL Review Flow</div>
+              <div class="comp-detail">Analista valida/edita playbooks gerados por LLM. Validações alimentam dataset de fine-tuning.</div>
+              <div class="comp-gap">✓ Confiança em playbooks gerados por IA</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">📊</span>Trust Calibration Panel</div>
+              <div class="comp-tech">Longitudinal Tracking · Survey API</div>
+              <div class="comp-detail">Monitoriza confiança do analista no sistema ao longo do tempo. Alertas de miscalibration.</div>
+              <div class="comp-gap">✓ Resolve gap trust longitudinal REF027</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LAYER 5 -->
+      <div class="layer l5">
+        <div class="layer-header" onclick="toggle(this)">
+          <div class="layer-num">L5</div>
+          <div class="layer-name">CAMADA DE GAMIFICAÇÃO & FORMAÇÃO ADAPTATIVA</div>
+          <div class="layer-tag">HUMAN RISK REDUCTION</div>
+          <div class="layer-chevron">▼</div>
+        </div>
+        <div class="layer-body">
+          <div class="layer-desc">
+            Módulo de gamificação para colaboradores da organização, alimentado por incidentes reais do SOCHAI. Gap completamente ausente em todos os benchmarks. Transforma o fator humano externo — responsável por 68-82% dos incidentes (Verizon DBIR 2024) — de ponto fraco em linha de defesa ativa.
+          </div>
+          <div class="gap-fixes">
+            <span class="gap-fix fix-d">▸ REF030: formação ligada ao SOCHAI</span>
+            <span class="gap-fix fix-d">▸ REF030: gamificação adaptativa</span>
+            <span class="gap-fix fix-d">▸ REF030: cobertura NICE completa</span>
+            <span class="gap-fix fix-d">▸ REF022: desengajamento precoce</span>
+            <span class="gap-fix fix-d">▸ Todos: Human Risk Score (ausente)</span>
+          </div>
+          <div class="components-grid">
+            <div class="comp-card" style="border-color:rgba(29,233,182,.3)">
+              <div class="comp-name"><span class="comp-icon">🎮</span>Adaptive Mission Engine</div>
+              <div class="comp-tech">Spaced Repetition · IA Adaptativa</div>
+              <div class="comp-detail">Missões diárias de 5 min geradas pelo SOCHAI com base em ameaças reais recentes. Dificuldade ajusta-se ao perfil.</div>
+              <div class="comp-gap" style="color:var(--teal)">★ NOVO — loop SOCHAI → formação → SOCHAI</div>
+            </div>
+            <div class="comp-card" style="border-color:rgba(29,233,182,.3)">
+              <div class="comp-name"><span class="comp-icon">🎣</span>Phishing Simulator</div>
+              <div class="comp-tech">GoPhish · LLM Template Gen.</div>
+              <div class="comp-detail">Simulações personalizadas geradas com LLM baseadas em campanhas reais detetadas pelo SOCHAI. Feedback imediato.</div>
+              <div class="comp-gap" style="color:var(--teal)">★ NOVO — phishing real → treino imediato</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🏆</span>Leaderboard Engine</div>
+              <div class="comp-tech">Gamification API · WebSocket</div>
+              <div class="comp-detail">Rankings por equipa/departamento. Pressão social positiva. Badges e certificações por nível NICE.</div>
+              <div class="comp-gap">✓ Engagement > formação tradicional</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🚪</span>Cyber Escape Room</div>
+              <div class="comp-tech">WebGL · Narrative Engine</div>
+              <div class="comp-detail">Cenários colaborativos de resposta a incidente baseados em casos reais do SOCHAI. Cobre gap REF030 (narrative).</div>
+              <div class="comp-gap">✓ Resolve gap narrativa REF030</div>
+            </div>
+            <div class="comp-card" style="border-color:rgba(29,233,182,.3)">
+              <div class="comp-name"><span class="comp-icon">📉</span>Human Risk Score</div>
+              <div class="comp-tech">Bayesian Risk Model · Dashboard</div>
+              <div class="comp-detail">Score de risco por colaborador e departamento, em tempo real. Alimenta analytics do SOCHAI. GDPR-compliant.</div>
+              <div class="comp-gap" style="color:var(--teal)">★ NOVO — feedback ao SOCHAI (ausente em todos)</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">📚</span>NICE Coverage Tracker</div>
+              <div class="comp-tech">NIST NICE Framework API</div>
+              <div class="comp-detail">Mapeia competências de cada colaborador ao NICE Framework. Identifica gaps de skill organizacional.</div>
+              <div class="comp-gap">✓ Cobertura NICE completa (REF030 0%→100%)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LAYER 6 -->
+      <div class="layer l6">
+        <div class="layer-header" onclick="toggle(this)">
+          <div class="layer-num">L6</div>
+          <div class="layer-name">CAMADA DE ORQUESTRAÇÃO, SOAR & RESPOSTA AUTOMÁTICA</div>
+          <div class="layer-tag">ORCHESTRATION + SOAR</div>
+          <div class="layer-chevron">▼</div>
+        </div>
+        <div class="layer-body">
+          <div class="layer-desc">
+            Camada de resposta automática e orquestração que fecha o ciclo: deteção → triagem LLM → playbook → execução → feedback → formação. Integra com ferramentas SOAR existentes e adiciona o RL-driven playbook optimization que faltava no REF006.
+          </div>
+          <div class="gap-fixes">
+            <span class="gap-fix fix-a">▸ REF006: RL playbooks em produção real</span>
+            <span class="gap-fix fix-b">▸ REF003: pipeline CTI → SOAR automático</span>
+            <span class="gap-fix fix-b">▸ REF008: SIGMA rules geradas por LLM</span>
+          </div>
+          <div class="components-grid">
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">⚙️</span>SOAR Integrator</div>
+              <div class="comp-tech">Shuffle · TheHive · Cortex</div>
+              <div class="comp-detail">Execução automática de playbooks aprovados. Integração com ticketing, firewall, AD, email.</div>
+              <div class="comp-gap">✓ Integração SOAR real (gap REF013)</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🤖</span>RL Playbook Optimizer</div>
+              <div class="comp-tech">Reinforcement Learning (PPO)</div>
+              <div class="comp-detail">Otimiza sequência de ações nos playbooks baseado em resultados reais. Supera simulação REF006.</div>
+              <div class="comp-gap">✓ RL em produção real (gap REF006)</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🌐</span>CTI Pipeline</div>
+              <div class="comp-tech">MISP · STIX/TAXII · NLP (BERT)</div>
+              <div class="comp-detail">Extração automática IoCs de relatórios CTI → SOAR. F1 91.3% (REF003). Multilíngue.</div>
+              <div class="comp-gap">✓ Pipeline CTI→SOAR automático (REF003)</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">📜</span>SIGMA Rule Generator</div>
+              <div class="comp-tech">LLM + Rule Validation</div>
+              <div class="comp-detail">Gera regras SIGMA para novos padrões de ataque detetados. 83% precisão (REF008) + validação automática.</div>
+              <div class="comp-gap">✓ Avaliação automática (gap REF008)</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">🔁</span>Feedback Loop</div>
+              <div class="comp-tech">Event Streaming · Kafka</div>
+              <div class="comp-detail">Resultados de incidentes fechados alimentam modelos ML, LLMs e módulo de gamificação. Ciclo fechado.</div>
+              <div class="comp-gap">✓ Loop SOCHAI→Formação→SOCHAI (único)</div>
+            </div>
+            <div class="comp-card">
+              <div class="comp-name"><span class="comp-icon">📊</span>CMM-SOCHAI Dashboard</div>
+              <div class="comp-tech">Capability Maturity Model</div>
+              <div class="comp-detail">Mede maturidade do SOCHAI nos 8 domínios (REF026) + Human Risk Score. Roadmap de evolução automático.</div>
+              <div class="comp-gap">✓ CMM-SOCHAI (gap REF026)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /arch-layers -->
+  </div>
+
+  <!-- DATA FLOW -->
+  <div class="flow-section">
+    <div class="section-title">Fluxo de Dados — Ciclo Virtuoso Completo</div>
+    <div class="flow-row">
+      <div class="flow-step" style="border-color:rgba(0,212,255,.4)">
+        <div class="flow-label" style="color:var(--accent)">TELEMETRIA</div>
+        <div class="flow-sub">L1 · Multi-fonte</div>
+      </div>
+      <div class="flow-step" style="border-color:rgba(255,171,0,.4)">
+        <div class="flow-label" style="color:var(--amber)">DETEÇÃO ML</div>
+        <div class="flow-sub">L2 · Ensemble</div>
+      </div>
+      <div class="flow-step" style="border-color:rgba(255,171,0,.4)">
+        <div class="flow-label" style="color:var(--amber)">LLM TRIAGEM</div>
+        <div class="flow-sub">L3 · 4 Agentes</div>
+      </div>
+      <div class="flow-step" style="border-color:rgba(255,171,0,.4)">
+        <div class="flow-label" style="color:var(--amber)">PLAYBOOK GEN</div>
+        <div class="flow-sub">L3 · RAG + LLM</div>
+      </div>
+      <div class="flow-step" style="border-color:rgba(179,136,255,.4)">
+        <div class="flow-label" style="color:var(--purple)">XAI + HITL</div>
+        <div class="flow-sub">L4 · Analista</div>
+      </div>
+      <div class="flow-step" style="border-color:rgba(0,230,118,.4)">
+        <div class="flow-label" style="color:var(--green)">SOAR EXEC.</div>
+        <div class="flow-sub">L6 · Automático</div>
+      </div>
+    </div>
+    <div class="flow-row" style="margin-top:4px">
+      <div class="flow-step" style="flex:none;width:120px;border-color:rgba(29,233,182,.4)">
+        <div class="flow-label" style="color:var(--teal)">INCIDENTE REAL</div>
+        <div class="flow-sub">SOCHAI detecta</div>
+      </div>
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--teal);font-size:20px">⟶</div>
+      <div class="flow-step" style="flex:none;width:160px;border-color:rgba(29,233,182,.4)">
+        <div class="flow-label" style="color:var(--teal)">CENÁRIO GERADO</div>
+        <div class="flow-sub">L5 · Gamificação</div>
+      </div>
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--teal);font-size:20px">⟶</div>
+      <div class="flow-step" style="flex:none;width:160px;border-color:rgba(29,233,182,.4)">
+        <div class="flow-label" style="color:var(--teal)">COLABORADOR TREINA</div>
+        <div class="flow-sub">L5 · Missão/Simulação</div>
+      </div>
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--teal);font-size:20px">⟶</div>
+      <div class="flow-step" style="flex:none;width:160px;border-color:rgba(29,233,182,.4)">
+        <div class="flow-label" style="color:var(--teal)">HUMAN RISK ↓</div>
+        <div class="flow-sub">SOCHAI Risk Score</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- METRICS -->
+  <div class="section-title">Métricas Alvo vs. Benchmarks da Literatura</div>
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <div class="metric-val" style="color:var(--green)">0.001%</div>
+      <div class="metric-label">FPR Alvo</div>
+      <div class="metric-source">Benchmark: REF017 (WSVM)</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-val" style="color:var(--accent)">< 5s</div>
+      <div class="metric-label">MTTD Alvo</div>
+      <div class="metric-source">Benchmark: REF016 (5.4s)</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-val" style="color:var(--amber)">&lt; 20s</div>
+      <div class="metric-label">LLM Latência</div>
+      <div class="metric-source">REF015: 152s → distilação</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-val" style="color:var(--green)">35%</div>
+      <div class="metric-label">FP após HITL</div>
+      <div class="metric-source">Benchmark: REF025 (70%→35%)</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-val" style="color:var(--purple)">90 min</div>
+      <div class="metric-label">MTTR Alvo</div>
+      <div class="metric-source">Benchmark: REF025 (8h→90min)</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-val" style="color:var(--teal)">75%</div>
+      <div class="metric-label">Tickets Auto</div>
+      <div class="metric-source">Benchmark: REF025 (10%→75%)</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-val" style="color:var(--amber)">-61%</div>
+      <div class="metric-label">Alertas Tier-1</div>
+      <div class="metric-source">Benchmark: REF010</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-val" style="color:var(--teal)">↓ 40%</div>
+      <div class="metric-label">Human Risk Score</div>
+      <div class="metric-source">★ Novo — sem benchmark</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-val" style="color:var(--green)">99%</div>
+      <div class="metric-label">Detection Acc.</div>
+      <div class="metric-source">Benchmark: REF016</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-val" style="color:var(--purple)">F1: 0.78</div>
+      <div class="metric-label">LLM Triage F1</div>
+      <div class="metric-source">Benchmark: REF015 CORTEX</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-val" style="color:var(--accent)">83%</div>
+      <div class="metric-label">SIGMA Rules</div>
+      <div class="metric-source">Benchmark: REF008</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-val" style="color:var(--teal)">100%</div>
+      <div class="metric-label">NICE Coverage</div>
+      <div class="metric-source">REF030: PR-VAM 0%→100%</div>
+    </div>
+  </div>
+
+  <footer>
+    <span>ONDAS Framework® · Paulo Serrano 710 · IPBeja MESI-FIC 2025</span>
+    <span>Arquitetura v3.0 · 6 Camadas · 4 Eixos · 30 Referências · Dez 2025</span>
+    <span style="color:var(--green)">★ 2 componentes originais sem precedente na literatura</span>
+  </footer>
+
+</div><!-- /wrapper -->
+
+<script>
+function toggle(hdr) {
+  const layer = hdr.parentElement;
+  layer.classList.toggle('open');
+}
+// Open all on load for overview, user can collapse
+document.querySelectorAll('.layer').forEach(l => l.classList.add('open'));
+</script>
+</body>
+</html>
